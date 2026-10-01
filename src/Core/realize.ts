@@ -6,7 +6,7 @@
 // the document stays the source of truth and the Part tree is a view.
 
 import { SongDoc, SectionDef, SectionInstance } from './doc';
-import { Key, chordSymbol, romanNumeral, spellInChord, spelledName, staffY, midiToFreq, mod12, BASS_MIN, BASS_MAX, VOICING_MAX, VOICING_MIN } from './theory';
+import { Key, chordSymbol, romanNumeral, spellInChord, spelledName, staffY, midiToFreq, mod12, BASS_MIN, BASS_TOP, VOICING_MAX, VOICING_MIN } from './theory';
 import { stepsToLegacyBeats, ticksToBeats } from './time';
 import { instanceDrums } from './drums';
 import { chordAt } from './bassline';
@@ -18,10 +18,14 @@ import { Part, NoteLocation, DrumHit } from '../types';
 
 export const transposedKey = (key: Key, semitones: number): Key => ({ tonic: mod12(key.tonic + semitones), mode: key.mode });
 
+// Open strings of a 4-string bass (E1 A1 D2 G2), and the highest fret.
+export const BASS_OPEN_MIDI = [28, 33, 38, 43];
+export const MAX_FRET = 20;
+
 function shiftBass(midi: number, t: number): number {
   if (midi <= 0) return 0;
   let n = midi + t;
-  while (n > BASS_MAX) n -= 12;
+  while (n > BASS_TOP) n -= 12;
   while (n < BASS_MIN) n += 12;
   return n;
 }
@@ -82,7 +86,11 @@ export function realizeInstance(doc: SongDoc, i: number, repeat: number): Part {
     bass.push(spelledName(spelled));
     const acc = spelled.acc > 0 ? 'sharp' : spelled.acc < 0 ? 'flat' : 'none';
     const y = staffY(midi, spelled);
-    return { x, y, acc, ...bassPitch(y, acc) };
+    // Keep a hand-picked tab string while the (possibly lifted) note is
+    // still playable on it.
+    const string = s.bassStrings?.[k];
+    const fret = string !== null && string !== undefined ? midi - BASS_OPEN_MIDI[string] : -1;
+    return { x, y, acc, ...bassPitch(y, acc), ...(fret >= 0 && fret <= MAX_FRET ? { string: string! } : {}) };
   });
 
   const drums: DrumHit[][] = instancePattern(doc, i).map(row => row.map((cell, step) => ({ index: step, checked: cell.checked, accent: cell.accent })));

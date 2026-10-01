@@ -48,6 +48,9 @@ export interface SectionDef {
   bassRhythm: number[];
   drumSteps: number[];
   bass: number[]; // MIDI per bass-rhythm note; 0 = rest
+  // Hand-picked tab strings per bass note (0 = low E ... 3 = G), or null to
+  // let the tab view choose. Cleared when the bass is regenerated.
+  bassStrings?: Array<number | null>;
   drums: DrumCell[][]; // [voice][step]
   voicing: number[][]; // MIDI chord tones per harmony event
   guideTones: number[]; // one 3rd/7th line note per harmony event

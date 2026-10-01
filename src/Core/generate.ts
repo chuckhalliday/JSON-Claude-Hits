@@ -45,6 +45,7 @@ function buildLayer(doc: SongDoc, s: SectionDef, layer: Layer): void {
     }
     case 'bass':
       s.bass = generateBass(s.bassRhythm, s.harmony, doc.key, s.energy, rng);
+      delete s.bassStrings;
       break;
     case 'drums':
       s.drums = generateDrums(s.label, s.drumSteps, s.bassRhythm, s.bass, s.energy, rng);
@@ -150,6 +151,7 @@ export function regenerateLayer(doc: SongDoc, id: string, layer: Layer): SongDoc
       buildLayer(doc, s, l);
     } else if (l === 'bass' && layer === 'rhythm') {
       s.bass = remapBass(old.bassRhythm, old.bass, s.bassRhythm);
+      delete s.bassStrings;
     } else if (l === 'drums' && layer === 'rhythm') {
       s.drums = remapDrums(old.drumSteps, old.drums, s.drumSteps);
     } else if (l === 'voicing' && layer === 'harmony') {

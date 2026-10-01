@@ -1,10 +1,14 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import playBass from '../Playback/playBass';
 import { setBassState, setCurrentBeat, SongState } from '../reducers';
 import { PlayHandle } from './Piano';
 import { useLampStep } from '../Playback/useLampStep';
 import appStyles from '../Styles/App.module.scss';
+import { NoteLocation } from '../types';
+import { isStaffPitch, PITCH_MIN_Y } from '../SongStructure/bassPitch';
+import { spellPc, staffY } from '../Core/theory';
+import { parseKeyString } from '../Core/exportMidi';
 
 // Standard 4-string bass tuning (E1 A1 D2 G2), lowest to highest, expressed as
 // the real MIDI note number of each open string - matches the `midi` values
@@ -22,7 +26,9 @@ const SPACING = 7.5;
 // ledger line under the staff and is the lowest note a 4-string bass can
 // produce, so the range doesn't extend any further down. Everything in
 // between lines up with a case in bassPitch.ts.
-const NOTE_MIN_Y = 0;
+// Highest placeable pitch: F4, three more ledger lines up (bassPitch.ts) -
+// room for the top of a 20-fret neck (Eb4 on the G string).
+const NOTE_MIN_Y = PITCH_MIN_Y;
 const NOTE_MAX_Y = 120;
 // Canvas-pixel margin above/below the mapped pitch range, so noteheads and
 // accidental symbols at the extremes have room to render without clipping.
@@ -32,7 +38,7 @@ const CANVAS_HEIGHT = NOTE_MAX_Y + STAFF_Y_OFFSET * 2;
 // of the 3 extra ledger lines above them (reachable via frets further up the
 // neck), and of the single ledger line below (the open low E string).
 const MAIN_LINES_Y = [45, 60, 75, 90, 105];
-const LEDGER_LINES_ABOVE_Y = [30, 15, 0];
+const LEDGER_LINES_ABOVE_Y = [30, 15, 0, -15, -30, -45];
 const LEDGER_LINES_BELOW_Y = [120];
 
 // Horizontal position of each tab line, top to bottom (G D A E) - vertically
@@ -109,6 +115,25 @@ function midiToTabPosition(midi: number, previous: TabPosition | null): TabPosit
   return candidates.sort((a, b) => a.stringIndex - b.stringIndex)[0];
 }
 
+// Tab position of every note of a part, left to right: a hand-picked string
+// when the note has one (and it's playable there), otherwise the closest
+// comfortable position to the previous note.
+function tabPositions(notes: NoteLocation[]): Array<TabPosition | null> {
+  let previous: TabPosition | null = null;
+  return notes.map((note) => {
+    if (note.midi <= 0) return null;
+    const fret = note.string !== undefined ? note.midi - BASS_OPEN_MIDI[note.string] : -1;
+    const position = fret >= 0 && fret <= MAX_FRET
+      ? { stringIndex: note.string!, fret }
+      : midiToTabPosition(note.midi, previous);
+    if (position) previous = position;
+    return position;
+  });
+}
+
+// Tab rows are drawn top (G) to bottom (E); strings are numbered from low E.
+const rowOfString = (stringIndex: number) => BASS_OPEN_MIDI.length - 1 - stringIndex;
+
 interface BassStaffProps {
   renderWidth: number;
   part: number;
@@ -145,10 +170,14 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
   const handleStep = useLampStep(lampsRef, part, drumGroove, bassGroove, chordsGroove);
 
   const [pendingNote, setPendingNote] = React.useState<{ x: number, y: number } | null>(null);
+  // The tab cell being typed into: a note (by x) on one string.
+  const [tabEdit, setTabEdit] = useState<{ x: number, stringIndex: number, value: string } | null>(null);
+  const skipBlurCommit = useRef(false);
 
   useEffect(() => {
     setPendingNote(null);
-  }, [part]);
+    setTabEdit(null);
+  }, [part, viewMode]);
 
   // One mouse record for the component's lifetime. It used to be a fresh
   // object every render, and since it sat in the effect dependency lists
@@ -280,11 +309,20 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
       ctx.font = `${fontSize}px serif`;
 
       //draw notes
-      if (location.y >= NOTE_MIN_Y) {
+      if (isStaffPitch(location.y)) {
         // location.y is pitch-space (unshifted, as stored on the note); `py`
         // is where that pitch actually lands on the canvas.
         const py = location.y + STAFF_Y_OFFSET;
         drawLedgerLines(ctx, location);
+        // Notes above the staff's top ledger lines take their stem (and
+        // flags) downward, mirrored about the notehead, so they stay on the
+        // canvas.
+        const stemDown = location.y < 0;
+        ctx.save();
+        if (stemDown) {
+          ctx.translate(0, 2 * py);
+          ctx.scale(1, -1);
+        }
         //add line for notes up to dotted half
         if (groove <= 2.5) {
           ctx.beginPath();
@@ -325,6 +363,7 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
             ctx.stroke();
             ctx.fill();
           }
+        ctx.restore();
         if (location.acc === 'flat') {
           ctx.fillText('♭', location.x + spacing * -3.5, py - spacing * 2 + fontSize);
         }
@@ -481,32 +520,23 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
     ctx.textAlign = 'left';
   }
 
+  // The note column and string under the mouse in tab view (a click there
+  // opens the fret editor), or null.
+  function tabCellAtMouse(): { note: NoteLocation, stringIndex: number } | null {
+    const x = mouseX(bassGrid);
+    const note = bassNoteGrid.find((n) => n.x === x);
+    if (!note || Math.abs(MOUSE.x - x) > 18) return null;
+    const row = TAB_LINE_Y.findIndex((y) => Math.abs(MOUSE.y - y) <= 8);
+    if (row === -1) return null;
+    return { note, stringIndex: rowOfString(row) };
+  }
+
   function drawTabNotes(ctx: CanvasRenderingContext2D) {
-    // Walked left to right so each note's string/fret choice can favor
-    // staying close to wherever the previous note left the hand, rather than
-    // being picked in isolation.
-    const orderedNotes = [...bassNoteGrid].sort((a, b) => a.x - b.x);
-    let previous: TabPosition | null = null;
-
-    orderedNotes.forEach((note) => {
-      let match = false;
-      for (let i = 1; i < bassGrid.length; i++) {
-        if (note.x === bassGrid[i]) {
-          match = true;
-          break;
-        }
-      }
-      if (!match) return;
-
-      const position = midiToTabPosition(note.midi, previous);
-      if (!position) return; // rest - leave the hand position as-is
-
-      previous = position;
-
-      // Strings are numbered low (E) to high (G); the tab lines are drawn top
-      // (G) to bottom (E), so the display row is the mirror of the string index.
-      const displayRow = BASS_OPEN_MIDI.length - 1 - position.stringIndex;
-      const y = TAB_LINE_Y[displayRow];
+    const positions = tabPositions(bassNoteGrid);
+    bassNoteGrid.forEach((note, k) => {
+      const position = positions[k];
+      if (!position || !bassGrid.includes(note.x)) return;
+      const y = TAB_LINE_Y[rowOfString(position.stringIndex)];
 
       // Blank out the line under the number so it reads clearly, matching how
       // printed tab renders fret numbers directly on the string.
@@ -521,6 +551,17 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
     });
+
+    // Hovered cell: where a click will type a fret.
+    const hover = tabCellAtMouse();
+    if (hover && !tabEdit) {
+      const y = TAB_LINE_Y[rowOfString(hover.stringIndex)];
+      ctx.save();
+      ctx.strokeStyle = '#4281b2';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(hover.note.x - 11, y - 9, 22, 18);
+      ctx.restore();
+    }
   }
 
   function drawScene() {
@@ -616,11 +657,19 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
       }
     }
 
-    function onMouseDown() {
+    function onMouseDown(event: MouseEvent) {
       MOUSE.isDown = true;
-      // Tab view is a read-only conversion of the staff - pitch editing (which
-      // repositions notes by staff row) doesn't apply to it.
-      if (viewMode === 'tab') return;
+      // Tab view: click a string at a note to type its fret there. The
+      // default mousedown action would move focus off the editor that just
+      // opened (the canvas can't take focus), closing it again.
+      if (viewMode === 'tab') {
+        const cell = tabCellAtMouse();
+        if (cell) {
+          event.preventDefault();
+          openTabEdit(cell.note.x, cell.stringIndex);
+        }
+        return;
+      }
       const CANVAS = canvasRef.current;
       if (CANVAS) {
         const spacing = SPACING;
@@ -653,7 +702,7 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
         // A note (not a rest) already sits in the exact cell being clicked -
         // show its two other accidental options instead of repositioning it.
         const clickedNote = bassNoteGrid.find(
-          (note) => note.x === x && note.y === index * spacing && note.y >= NOTE_MIN_Y
+          (note) => note.x === x && note.y === index * spacing && isStaffPitch(note.y)
         );
 
         if (clickedNote) {
@@ -689,7 +738,85 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
     };
     // Re-bound only when something the handlers read changes - not on every
     // playback step.
-  }, [MOUSE, viewMode, pendingNote, bassNoteGrid, bassGrid, part, dispatch, requestDraw]);
+  }, [MOUSE, viewMode, pendingNote, bassNoteGrid, bassGrid, part, dispatch, requestDraw, tabEdit]);
+
+  // ---- Tab fret editor -----------------------------------------------------
+
+  // Open the editor on a note's column and string, showing the note's fret
+  // if it's played on that string.
+  function openTabEdit(x: number, stringIndex: number) {
+    const k = bassNoteGrid.findIndex((n) => n.x === x);
+    if (k === -1) return;
+    const position = tabPositions(bassNoteGrid)[k];
+    const value = position && position.stringIndex === stringIndex ? String(position.fret) : '';
+    skipBlurCommit.current = false;
+    setTabEdit({ x, stringIndex, value });
+    setPendingNote(null);
+  }
+
+  // Apply what was typed: a fret number moves the note to that string and
+  // fret (re-spelled on the staff for the key); empty or "x" on the note's
+  // own string turns it into a rest. Anything else leaves it as it was.
+  function commitTabEdit(edit: { x: number, stringIndex: number, value: string }) {
+    const k = bassNoteGrid.findIndex((n) => n.x === edit.x);
+    if (k === -1) return;
+    const note = bassNoteGrid[k];
+    const text = edit.value.trim().toLowerCase();
+    const current = tabPositions(bassNoteGrid)[k];
+    let updated: NoteLocation | null = null;
+    if (text === '' || text === 'x' || text === '-') {
+      if (current && current.stringIndex === edit.stringIndex) {
+        updated = { ...note, y: -20, acc: 'none', string: undefined };
+      }
+    } else if (/^\d{1,2}$/.test(text) && Number(text) <= MAX_FRET) {
+      const fret = Number(text);
+      if (current && current.stringIndex === edit.stringIndex && current.fret === fret && note.string === edit.stringIndex) return;
+      const midi = BASS_OPEN_MIDI[edit.stringIndex] + fret;
+      const key = parseKeyString(song.key) ?? { tonic: 0, mode: 'major' as const };
+      const spelled = spellPc(midi, key);
+      const acc = spelled.acc > 0 ? 'sharp' : spelled.acc < 0 ? 'flat' : 'none';
+      updated = { ...note, y: staffY(midi, spelled), acc, string: edit.stringIndex };
+    }
+    if (updated) {
+      dispatch(setBassState({ index: part, bassNoteLocations: bassNoteGrid.map((n, i) => (i === k ? updated! : n)) }));
+    }
+  }
+
+  function handleTabKey(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (!tabEdit) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      skipBlurCommit.current = true;
+      commitTabEdit(tabEdit);
+      setTabEdit(null);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      skipBlurCommit.current = true;
+      setTabEdit(null);
+    } else if (event.key === 'Tab') {
+      // Commit and move along the same string to the next (or previous) note.
+      event.preventDefault();
+      skipBlurCommit.current = true;
+      commitTabEdit(tabEdit);
+      const columns = bassNoteGrid.map((n) => n.x).filter((x) => bassGrid.includes(x)).sort((a, b) => a - b);
+      const next = columns[columns.indexOf(tabEdit.x) + (event.shiftKey ? -1 : 1)];
+      if (next !== undefined) {
+        // Opened after the edit lands, reading the updated notes.
+        setTimeout(() => openTabEditRef.current(next, tabEdit.stringIndex));
+      } else {
+        setTabEdit(null);
+      }
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const n = Number(tabEdit.value);
+      const base = tabEdit.value === '' || Number.isNaN(n) ? 0 : n;
+      const value = Math.min(MAX_FRET, Math.max(0, base + (event.key === 'ArrowUp' ? 1 : -1)));
+      setTabEdit({ ...tabEdit, value: String(value) });
+    }
+  }
+
+  const openTabEditRef = useRef(openTabEdit);
+  openTabEditRef.current = openTabEdit;
 
   const [isPlaying, setIsPlaying] = React.useState(false);
   const stopRef = useRef(false);
@@ -720,7 +847,7 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
   // Draw when what the staff shows changes, and once the clef image loads.
   useEffect(() => {
     requestDraw();
-  }, [requestDraw, renderWidth, bassNoteGrid, bassGroove, chords, chordGrid, bassGrid, measureLines, pendingNote, viewMode]);
+  }, [requestDraw, renderWidth, bassNoteGrid, bassGroove, chords, chordGrid, bassGrid, measureLines, pendingNote, viewMode, tabEdit]);
 
   useEffect(() => {
     if (!CLEF_IMAGE.complete) CLEF_IMAGE.addEventListener('load', requestDraw);
@@ -739,7 +866,7 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
     // width (the canvas merely overflows it visually), so the button would
     // stop sticking a screen-width into the scroll. Matching the canvas's
     // actual rendered width here gives it room to stick the whole way.
-    <div style={{ width: renderWidth || '100%' }}>
+    <div style={{ width: renderWidth || '100%', position: 'relative' }}>
       <button
         type="button"
         onClick={() => onViewModeChange(viewMode === 'staff' ? 'tab' : 'staff')}
@@ -748,6 +875,32 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
         {viewMode === 'staff' ? 'Staff' : 'Tab'}
       </button>
       <canvas ref={canvasRef} id="myCanvas" />
+      {viewMode === 'tab' && tabEdit && (
+        <input
+          key={`${tabEdit.x}:${tabEdit.stringIndex}`}
+          className={appStyles.tabInput}
+          style={{
+            left: tabEdit.x - 15,
+            top: (canvasRef.current?.offsetTop ?? 0) + TAB_LINE_Y[rowOfString(tabEdit.stringIndex)] - 12,
+          }}
+          value={tabEdit.value}
+          autoFocus
+          inputMode="numeric"
+          maxLength={2}
+          aria-label="Fret number"
+          title="Fret 0-20 · Enter to set · Tab for the next note · ↑↓ to step · x or empty to make a rest · Esc to cancel"
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setTabEdit({ ...tabEdit, value: e.target.value.replace(/[^0-9xX-]/g, '') })}
+          onKeyDown={handleTabKey}
+          onBlur={() => {
+            if (!skipBlurCommit.current) commitTabEdit(tabEdit);
+            skipBlurCommit.current = false;
+            // Clicking another cell opens its editor before this one blurs;
+            // close only if this edit is still the open one.
+            setTabEdit((open) => (open === tabEdit ? null : open));
+          }}
+        />
+      )}
     </div>
   )
 });

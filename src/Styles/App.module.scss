@@ -753,3 +753,20 @@ input[type="range"].bpm::-moz-range-thumb {
     background-color: #ff8c00 !important;
     color: #fff;
 }
+
+// Fret editor over a tab string.
+.tabInput {
+    position: absolute;
+    z-index: 3;
+    width: 30px;
+    height: 24px;
+    box-sizing: border-box;
+    padding: 0;
+    border: 2px solid #4281b2;
+    border-radius: 4px;
+    background: #fff;
+    font: 700 13px sans-serif;
+    text-align: center;
+    outline: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}

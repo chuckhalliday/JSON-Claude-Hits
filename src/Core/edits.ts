@@ -48,6 +48,9 @@ export function editBass(doc: SongDoc, index: number, locations: NoteLocation[])
       const midi = bassPitch(loc.y, loc.acc).midi;
       return midi > 0 ? midi - inst.transpose : 0;
     });
+    // Tab strings picked by hand travel with the notes.
+    const strings = sec.bass.map((_: number, k: number) => locations[k]?.string ?? sec.bassStrings?.[k] ?? null);
+    if (strings.some((st: number | null) => st !== null)) sec.bassStrings = strings;
   }, 'bass');
 }
 
@@ -94,7 +97,10 @@ export function editChord(doc: SongDoc, index: number, chordIndex: number, chang
     const under = onsets.map((t, k) => (t >= next.start && t < next.start + next.dur ? k : -1)).filter((k: number) => k >= 0);
     if (!sec.locks.bass) {
       const fresh = generateBass(sec.bassRhythm, sec.harmony, doc.key, sec.energy, streamFor(doc.seed, sec.id, 'bass', sec.rolls.bass));
-      under.forEach((k: number) => { sec.bass[k] = fresh[k]; });
+      under.forEach((k: number) => {
+        sec.bass[k] = fresh[k];
+        if (sec.bassStrings) sec.bassStrings[k] = null;
+      });
     }
     // The downbeat always takes the chord's bass note (its inversion), in
     // the octave nearest the note it replaces.
@@ -106,7 +112,10 @@ export function editChord(doc: SongDoc, index: number, chordIndex: number, chang
       for (let m = BASS_MIN; m <= BASS_MAX; m++) {
         if (mod12(m - 24 - doc.key.tonic) === pc && (best === 0 || Math.abs(m - around) < Math.abs(best - around))) best = m;
       }
-      if (best) sec.bass[downbeat] = best;
+      if (best) {
+        sec.bass[downbeat] = best;
+        if (sec.bassStrings) sec.bassStrings[downbeat] = null;
+      }
     }
   }, 'harmony');
 }

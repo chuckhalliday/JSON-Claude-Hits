@@ -312,7 +312,10 @@ export function staffY(midi: number, s: Spelled): number {
 
 // Lowest/highest bass notes the staff (and a 4-string bass) can show.
 export const BASS_MIN = 28; // E1
-export const BASS_MAX = 55; // G3
+export const BASS_MAX = 55; // G3 - the generators' ceiling
+// Highest note a hand edit may place: fret 20 on the G string (the staff
+// shows up to F4).
+export const BASS_TOP = 63; // Eb4
 
 // The range the piano roll displays chord voicings in (F3..E6).
 export const VOICING_MIN = 53;

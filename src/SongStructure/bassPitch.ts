@@ -1,4 +1,4 @@
-import { tone, midiTone } from "./tone";
+import { tone } from "./tone";
 
 export interface Pitch {
   osc: number;  // oscillator frequency in Hz (0 or negative = rest / no pitch)
@@ -10,70 +10,37 @@ export interface Pitch {
 // that mapping, so playback can read a note's stored osc/midi and never has to
 // interpret pixel coordinates.
 //
-// Extracted verbatim from the old `mapBassValue()` switch that used to live
-// inside the audio scheduler (playBass.ts), keyed on the exact staff-Y
-// constants that drawBass emits. Behaviour is intentionally identical.
-export function bassPitch(y: number, acc: string): Pitch {
-  const pick = (name: keyof typeof tone, octave: number): Pitch => ({
-    osc: tone[name][octave],
-    midi: midiTone[name][octave - 1],
-  });
+// Staff positions are 7.5 apart per diatonic step, with the open low E (E1)
+// on the ledger line below the staff at y = 120. (Bass is written an octave
+// above where it sounds; these are sounding pitches.) Positions run up to
+// F4 at y = -45 - three ledger lines above the staff's existing top ledgers -
+// so the whole 20-fret range of a 4-string bass (up to Eb4) can be shown.
+export const STAFF_STEP = 7.5;
+export const PITCH_MAX_Y = 120; // E1
+export const PITCH_MIN_Y = -45; // F4
 
-  switch (y) {
-    // E (ledger, below) - the open low string, the lowest note a 4-string
-    // bass can produce, so nothing is mapped further below this.
-    case 120: return acc === 'flat' ? pick('Eb', 1) : pick('E', 1);
-    case 67.5: return acc === 'flat' ? pick('Eb', 2) : pick('E', 2);
-    // E (ledger, above)
-    case 15: return acc === 'flat' ? pick('Eb', 3) : pick('E', 3);
-    // F
-    case 112.5: return acc === 'sharp' ? pick('Gb', 1) : pick('F', 1);
-    case 60: return acc === 'sharp' ? pick('Gb', 2) : pick('F', 2);
-    // F (ledger, above)
-    case 7.5: return acc === 'sharp' ? pick('Gb', 3) : pick('F', 3);
-    // G
-    case 105:
-      if (acc === 'sharp') return pick('Ab', 1);
-      if (acc === 'flat') return pick('Gb', 1);
-      return pick('G', 1);
-    case 52.5:
-      if (acc === 'sharp') return pick('Ab', 2);
-      if (acc === 'flat') return pick('Gb', 2);
-      return pick('G', 2);
-    // G (ledger, above)
-    case 0:
-      if (acc === 'sharp') return pick('Ab', 3);
-      if (acc === 'flat') return pick('Gb', 3);
-      return pick('G', 3);
-    // A
-    case 97.5:
-      if (acc === 'sharp') return pick('Bb', 1);
-      if (acc === 'flat') return pick('Ab', 1);
-      return pick('A', 1);
-    case 45:
-      if (acc === 'sharp') return pick('Bb', 2);
-      if (acc === 'flat') return pick('Ab', 2);
-      return pick('A', 2);
-    // B
-    case 90: return acc === 'flat' ? pick('Bb', 1) : pick('B', 1);
-    case 37.5: return acc === 'flat' ? pick('Bb', 2) : pick('B', 2);
-    // C
-    case 82.5: return acc === 'sharp' ? pick('Db', 2) : pick('C', 2);
-    case 30: return acc === 'sharp' ? pick('Db', 3) : pick('C', 3);
-    // D
-    case 75:
-      if (acc === 'sharp') return pick('Eb', 2);
-      if (acc === 'flat') return pick('Db', 2);
-      return pick('D', 2);
-    // D (ledger, above)
-    case 22.5:
-      if (acc === 'sharp') return pick('Eb', 3);
-      if (acc === 'flat') return pick('Db', 3);
-      return pick('D', 3);
-    default:
-      // Faithful to the legacy default: a rest (y = -20) or a note dragged off
-      // the mapped staff grid falls through with the raw y as its "pitch".
-      // Playback treats values <= 0 as rests.
-      return { osc: y, midi: y };
+const LETTER_PC = [0, 2, 4, 5, 7, 9, 11]; // C D E F G A B
+const NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
+const E1_STEP = 1 * 7 + 2; // E in octave 1, counted in letters from C0
+
+// Whether a y is a pitched staff position (rests sit at y = -20, off-grid).
+export const isStaffPitch = (y: number) =>
+  y >= PITCH_MIN_Y && y <= PITCH_MAX_Y && Number.isInteger(y / STAFF_STEP);
+
+export function bassPitch(y: number, acc: string): Pitch {
+  if (!isStaffPitch(y)) {
+    // A rest (y = -20) or a position off the grid has no pitch; its raw y
+    // passes through as before, and playback treats values <= 0 as rests.
+    return { osc: y, midi: y };
   }
+  const step = E1_STEP + Math.round((PITCH_MAX_Y - y) / STAFF_STEP);
+  const letter = step % 7;
+  const octave = Math.floor(step / 7);
+  // Accidentals the staff can't spell on that letter (E#, B#, Cb, Fb) leave
+  // the natural, as the original per-position table did.
+  let shift = acc === 'sharp' ? 1 : acc === 'flat' ? -1 : 0;
+  if ((shift === 1 && (letter === 2 || letter === 6)) || (shift === -1 && (letter === 0 || letter === 3))) shift = 0;
+  const midi = (octave + 1) * 12 + LETTER_PC[letter] + shift;
+  const name = NAMES[midi % 12];
+  return { osc: tone[name][Math.floor(midi / 12) - 1], midi };
 }

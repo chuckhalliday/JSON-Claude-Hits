@@ -23,6 +23,9 @@ export interface NoteLocation {
   acc: string;
   osc: number;
   midi: number;
+  // String the note is played on in tab view (0 = low E ... 3 = G), when
+  // chosen by hand; otherwise tab picks a comfortable position itself.
+  string?: number;
 }
 
 // Concurrent chord voicings per beat: oscillator frequencies and MIDI notes.
