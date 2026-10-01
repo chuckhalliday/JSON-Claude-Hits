@@ -4,6 +4,7 @@ import { createChords, chordArray } from './chords';
 import { createRandomSong } from './createSong';
 import generateSong from './generateSong';
 import { bassPitch } from './bassPitch';
+import { drawBass } from './bass';
 import { tone, midiTone } from './tone';
 import { seedRng } from './rng';
 import { setTuning, defaultTuning, normalizeTuning, tuningBounds } from './tuning';
@@ -258,5 +259,40 @@ describe('bassPitch (staff position -> pitch)', () => {
   it('treats an off-grid / rest position as a rest (pitch <= 0)', () => {
     expect(bassPitch(-20, 'none').osc).toBeLessThanOrEqual(0);
     expect(bassPitch(-20, 'none').midi).toBeLessThanOrEqual(0);
+  });
+});
+describe('drawBass (note names -> staff + pitch)', () => {
+  const PC: { [name: string]: number } = {
+    C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6,
+    G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11,
+  };
+
+  it('reads each note and its accidental from the same entry', () => {
+    // Accidentals next to naturals used to be read from the *next* entry,
+    // turning sharps/flats into rests and shifting neighbouring naturals.
+    const bass = ['F#', 'A', 'Bb', 'C#', 'D', 'Eb', 'G#', 'Ab', 'Gb', 'Db', 'E', '-'];
+    const grid = [-10, ...bass.map((_, i) => 115 + i * 40)];
+    const locs = drawBass(bass, grid);
+    bass.forEach((name, i) => {
+      if (name === '-') {
+        expect(locs[i].midi).toBeLessThanOrEqual(0);
+      } else {
+        expect(locs[i].midi).toBeGreaterThan(0);
+        expect(locs[i].midi % 12).toBe(PC[name]);
+      }
+    });
+  });
+
+  it('gives every pitched bass note of seeded songs its intended pitch class', () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const { songStructure } = createRandomSong(seed);
+      for (const part of songStructure) {
+        part.bass.forEach((name, i) => {
+          const loc = part.bassNoteLocations[i];
+          if (!loc || !(name in PC)) return;
+          expect(loc.midi % 12).toBe(PC[name]);
+        });
+      }
+    }
   });
 });

@@ -495,31 +495,22 @@ export function drawBass(bass: string[], bassGrid: number[]) {
     let noteLocation: NoteLocation = { x: 0, y: 0, acc: 'none', osc: 0, midi: 0 } // Create a new object for each iteration
   
       noteLocation.x = bassGrid[i];
-      if (bass[i - 1] === 'G' || bass[i] === 'G#' || bass[i] === 'Gb') {
-        noteLocation.y = 52.5;
-      } else if (bass[i - 1] === 'F' || bass[i] === 'F#') {
-        noteLocation.y = 60;
-      } else if (bass[i - 1] === 'E' || bass[i] === 'Eb') {
-        noteLocation.y = 67.5;
-      } else if (bass[i - 1] === 'D' || bass[i] === 'D#' || bass[i] === 'Db') {
-        noteLocation.y = 75;
-      } else if (bass[i - 1] === 'C' || bass[i] === 'C#') {
-        noteLocation.y = 82.5;
-      } else if (bass[i - 1] === 'B' || bass[i] === 'Bb') {
-        noteLocation.y = 90;
-      } else if (bass[i - 1] === 'A' || bass[i] === 'A#' || bass[i] === 'Ab') {
-        noteLocation.y = 97.5;
-      } else {
-        noteLocation.y = -20
-      }
-      if (bass[i - 1] === 'A#' || bass[i - 1] === 'C#' || bass[i - 1] === 'D#' || bass[i - 1] === 'F#' || bass[i - 1] === 'G#') {
+      // Each grid slot draws the previous bass entry (the grid carries a
+      // leading clef offset). The staff line comes from the note's letter and
+      // the accidental from its suffix, both read from the same entry.
+      const name = bass[i - 1] ?? '';
+      const staffY: { [letter: string]: number } = {
+        G: 52.5, F: 60, E: 67.5, D: 75, C: 82.5, B: 90, A: 97.5,
+      };
+      noteLocation.y = staffY[name.charAt(0)] ?? -20;
+      if (name.length === 2 && name.charAt(1) === '#') {
         noteLocation.acc = 'sharp';
-      } else if (bass[i - 1] === 'Ab' || bass[i - 1] === 'Bb' || bass[i - 1] === 'Db' || bass[i - 1] === 'Eb' || bass[i - 1] === 'Gb') {
+      } else if (name.length === 2 && name.charAt(1) === 'b') {
         noteLocation.acc = 'flat';
       } else {
         noteLocation.acc = 'none'
       }
-  
+
       // Store the note's concrete pitch alongside its staff position, computed
       // from the same (y, acc) the staff draws. Playback reads osc/midi and
       // never has to interpret pixels.
