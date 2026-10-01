@@ -13,7 +13,7 @@ import { useSelector, useDispatch } from "react-redux"
 import { playVerse } from '../Playback/playSong';
 import { getAudioContext } from '../Playback/audioContext';
 import { useLampStep } from '../Playback/useLampStep';
-import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setPartLinked, duplicatePart, deletePart } from '../reducers';
+import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setPartLinked, duplicatePart, deletePart, undo } from '../reducers';
 import { isDetached, linkedCount } from '../Core/generate';
 import { beatsInPart, clampRegion, containsPoint, describePoint, partWindow, stepBeat, sum, trackWindow } from '../Playback/loop';
 import type { AppDispatch } from '../store'
@@ -487,6 +487,41 @@ function App() {
    }
  };
 
+ // Undo the last song change (button at the far right of the parts row, or
+ // Ctrl/Cmd+Z outside text fields).
+ const past = song.past ?? [];
+ const handleUndo = () => {
+   if (past.length === 0) return;
+   stopForEdit();
+   setPartMenu(null);
+   dispatch(undo());
+   // A part that no longer exists can't stay open.
+   const length = past[past.length - 1].songStructure.length;
+   if (currentPart >= length) {
+     setOpenedParts({});
+     setCurrentPart(-1);
+   }
+ };
+ const handleUndoRef = React.useRef(handleUndo);
+ handleUndoRef.current = handleUndo;
+ useEffect(() => {
+   const onKey = (e: KeyboardEvent) => {
+     // Leave Ctrl/Cmd+Z to text fields (their own text undo); checkboxes,
+     // lamps and sliders keep it for the song.
+     const target = e.target as HTMLElement;
+     const typing = target instanceof HTMLInputElement
+       ? !['checkbox', 'radio', 'range', 'button'].includes(target.type)
+       : !!target.closest('textarea, select, [contenteditable="true"]');
+     if (typing) return;
+     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+       e.preventDefault();
+       handleUndoRef.current();
+     }
+   };
+   window.addEventListener('keydown', onKey);
+   return () => window.removeEventListener('keydown', onKey);
+ }, []);
+
  const handleDuplicatePart = (index: number) => {
    stopForEdit();
    setPartMenu(null);
@@ -688,6 +723,15 @@ function App() {
           );
         })}
         </div>
+        {past.length > 0 && (
+          <button
+            className={styles.undoButton}
+            onClick={handleUndo}
+            title={`Undo ${past[past.length - 1].label} (Ctrl/⌘+Z)`}
+          >
+            ↶ Undo
+          </button>
+        )}
         {partMenu && song.songStructure[partMenu.index] && (
           <div ref={partMenuRef} className={styles.partMenu} style={{ left: partMenu.left, top: partMenu.top }} role="menu">
             <div className={styles.partMenuTitle}>{song.songStructure[partMenu.index].type} ({song.songStructure[partMenu.index].repeat})</div>

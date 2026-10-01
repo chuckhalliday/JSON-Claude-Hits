@@ -77,6 +77,9 @@ export default function Save({ onClose }: SaveProps) {
         onClose()
       }
 
+    // Undo history stays in the session; it isn't part of the saved song.
+    const { past: _past, ...savable } = song;
+
     const save = async () => {
         if(name === ''){
             alert('Please name the song')
@@ -97,7 +100,7 @@ export default function Save({ onClose }: SaveProps) {
         if (existing && existing.length > 0) {
             const { error } = await supabase
             .from('songs')
-            .update([{data: song}])
+            .update([{data: savable}])
             .eq('name', name)
             .select()
             if (error) {
@@ -109,7 +112,7 @@ export default function Save({ onClose }: SaveProps) {
         } else {
             const { error } = await supabase
             .from('songs')
-            .insert([{data: song, name: name, user: user}])
+            .insert([{data: savable, name: name, user: user}])
             .select()
             if (error) {
                 alert(`Failed to create ${name}: ${error.message}`)

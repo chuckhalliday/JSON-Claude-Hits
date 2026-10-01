@@ -1,4 +1,4 @@
-import { createSlice, PayloadAction, Dispatch, current } from "@reduxjs/toolkit";
+import { createSlice, createAction, PayloadAction, Dispatch, AnyAction, current } from "@reduxjs/toolkit";
 import { SongStructure, NoteLocation, DrumHit, SongParams } from "./types";
 import { bassPitch } from "./SongStructure/bassPitch";
 import { SongDoc, Layer, GenerateOptions } from "./Core/doc";
@@ -32,7 +32,24 @@ export interface SongState {
     // number sets, and the item picked as the start (so the end pick can
     // complete the region from it).
     loopPick?: 'start' | 'end' | null,
-    loopAnchor?: LoopSpan | null
+    loopAnchor?: LoopSpan | null,
+    // Undo history: the song as it was before each undoable change, newest
+    // last (see `songReducer`). Not saved with a song.
+    past?: UndoSnapshot[]
+}
+
+// What an undo restores.
+export interface UndoSnapshot {
+  label: string;
+  songStructure: SongStructure;
+  doc: SongDoc | null;
+  key: string;
+  bpm: number;
+  seed: number | null;
+  params: SongParams | null;
+  selectedBeat: number[];
+  loop: LoopRegion | null;
+  loopEnabled: boolean;
 }
 
 // The song tree starts empty and deterministic. The first song is produced by
@@ -340,5 +357,60 @@ export const newSong = (options?: number | GenerateOptions) => (dispatch: Dispat
   const opts = typeof options === 'number' ? { seed: options } : options ?? {};
   dispatch(setSong(songFromDoc(generateDoc(opts))));
 };
+
+// ---- Undo ------------------------------------------------------------------
+
+export const undo = createAction('song/undo');
+
+const HISTORY_LIMIT = 50;
+
+// The changes Undo can take back, and how its button names them.
+const UNDOABLE: Record<string, string> = {
+  [song.actions.setBassState.type]: 'bass edit',
+  [song.actions.setDrumState.type]: 'drum edit',
+  [song.actions.setChordState.type]: 'voicing edit',
+  [song.actions.editHarmony.type]: 'chord change',
+  [song.actions.rerollLayer.type]: 're-roll',
+  [song.actions.toggleLock.type]: 'lock',
+  [song.actions.setPartEnergy.type]: 'energy change',
+  [song.actions.setPartLinked.type]: 'link change',
+  [song.actions.duplicatePart.type]: 'duplicate',
+  [song.actions.deletePart.type]: 'delete',
+  [song.actions.reorderParts.type]: 'reorder',
+  [song.actions.setSong.type]: 'new song',
+};
+
+const snapshotOf = (state: SongState, label: string): UndoSnapshot => ({
+  label,
+  songStructure: state.songStructure,
+  doc: state.doc ?? null,
+  key: state.key,
+  bpm: state.bpm,
+  seed: state.seed,
+  params: state.params,
+  selectedBeat: state.selectedBeat,
+  loop: state.loop ?? null,
+  loopEnabled: !!state.loopEnabled,
+});
+
+// The song slice with undo: before an undoable action that actually changes
+// the song, the previous song is pushed onto `past` (structurally shared,
+// so cheap); `undo` pops and restores it.
+export function songReducer(state: SongState | undefined, action: AnyAction): SongState {
+  if (undo.match(action)) {
+    const past = state?.past ?? [];
+    if (!state || past.length === 0) return state ?? song.reducer(undefined, action);
+    const { label: _label, ...restore } = past[past.length - 1];
+    return { ...state, ...restore, past: past.slice(0, -1), isPlaying: false, loopPick: null, loopAnchor: null };
+  }
+  const next = song.reducer(state, action);
+  const label = UNDOABLE[action.type];
+  if (!label || !state || next === state) return next;
+  // The first song loaded at startup has nothing before it to go back to.
+  if (state.songStructure.length === 0) return next;
+  const changed = next.songStructure !== state.songStructure || next.doc !== state.doc || next.key !== state.key;
+  if (!changed) return next;
+  return { ...next, past: [...(state.past ?? []).slice(-(HISTORY_LIMIT - 1)), snapshotOf(state, label)] };
+}
 
 export default song;
