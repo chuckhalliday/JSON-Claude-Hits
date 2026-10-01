@@ -2,6 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react'
 import Info from './Info';
 import Generate from './Generate';
 import Save from './Save';
+import SectionPanel from './SectionPanel';
+import { SHORT_LABELS } from '../Core/form';
+import { downloadMidi } from '../Core/exportMidi';
+import { SectionLabel } from '../Core/doc';
 import DrumMachine from "./DrumMachine";
 import BassStaff from "./BassStaff";
 import Piano, { PlayHandle } from './Piano';
@@ -373,6 +377,12 @@ function App() {
     dispatch(setAcoustic({ acoustic: !acoustic }));
   };
 
+  // Download the song (with every edit) as a Standard MIDI File for a DAW.
+  const handleExport = () => {
+    const filename = `${song.key.replace(/\s+/g, '-')}-${song.bpm}bpm${song.seed != null ? `-${song.seed}` : ''}`;
+    downloadMidi({ songStructure: song.songStructure, bpm: song.bpm, key: song.key, title: `Song in ${song.key}` }, filename);
+  };
+
   const handleMidi = async () => {
     if (midi) {
       dispatch(setMidi({midi: false}));
@@ -404,6 +414,12 @@ function App() {
           const songParts = [];
           const key = `${index}`;
           const isOpen = openedParts[key];
+          // Blocks are sized by bars so the row reads as the arrangement.
+          const bars = Math.round(songProps.drumGroove.reduce((a, b) => a + b, 0) / 4);
+          const shortLabel = SHORT_LABELS[songProps.type as SectionLabel] ?? songProps.type.charAt(0);
+          const blockTitle = `${songProps.type} ${songProps.repeat} · ${bars} bars`
+            + (songProps.transpose ? ` · +${songProps.transpose} lift` : '')
+            + `\n${songProps.chords.filter(c => c !== '-').join('  ')}`;
 
           return (
             <div key={key} className={styles.parts}>
@@ -420,12 +436,19 @@ function App() {
                   draggedPartIndex === index ? styles.draggingPart : '',
                   dragOverPartIndex === index ? styles.dragOverPart : '',
                 ].filter(Boolean).join(' ')}
+                style={{ width: `${Math.max(30, bars * 5)}px` }}
+                title={blockTitle}
               >
-                {songProps.type.charAt(0)}
+                {shortLabel}
+                {songProps.transpose ? <sup>↑</sup> : null}
+                {songProps.energy !== undefined && (
+                  <span className={styles.energyBar} style={{ width: `${Math.round(songProps.energy * 100)}%` }} />
+                )}
               </button>
               {isOpen && currentPart === index && (
                 <div className={styles.openedPart}>
                   <h3>{songProps.type} ({songProps.repeat})</h3>
+                  <SectionPanel part={index} />
                   <BassStaff
                     ref={bassStaffRef}
                     renderWidth={renderWidth}
@@ -516,6 +539,7 @@ function App() {
             <button onClick={handleMidi} className={styles.button}>
               {midi ? "Use Osc" : "Use Midi"}
             </button>
+            <button onClick={handleExport} className={styles.button} title="Download a multitrack .mid (drums, bass, chords, guide tones, section markers) for your DAW">Export MIDI</button>
             <button onClick={handleSaveClick} className={styles.button}>Save/Load</button>
             <button onClick={logout} className={styles.button}>Log Out</button>
           </div>

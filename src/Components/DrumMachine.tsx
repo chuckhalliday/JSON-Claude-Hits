@@ -50,8 +50,10 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
       for (let trackId = 0; trackId < drums.length; trackId++) {
         for (let i = 0; i < numOfSteps; i++) {
           const inputElement = stepsRef.current[trackId][i] as HTMLInputElement;
-          if (drums[trackId][i].checked === true) {
-            inputElement.checked = true;
+          // Mirror the store both ways: a re-roll or an edit propagated from
+          // another instance of this section can also clear cells.
+          if (inputElement && drums[trackId]?.[i]) {
+            inputElement.checked = drums[trackId][i].checked === true;
           }
         }
       }
@@ -104,12 +106,9 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
       return;
     }
 
-    const drumHits: DrumHit[][] = stepsRef.current.map((row) =>
-      row.map((inputElement, columnIndex) => ({
-        index: columnIndex,
-        checked: inputElement.checked,
-      }))
-    );
+    // Play the store's pattern (the checkboxes mirror it). Reading the DOM
+    // here could pick up stale cells after a re-roll shortened the grid.
+    const drumHits: DrumHit[][] = drums;
     stopRef.current = false;
     setIsPlaying(true);
     onPlayingChange?.(true);

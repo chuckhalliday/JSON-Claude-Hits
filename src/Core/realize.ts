@@ -98,7 +98,9 @@ export function realizeInstance(doc: SongDoc, i: number, repeat: number): Part {
     drumGroove,
     stepIds: [],
     chords,
-    chordTones: { midiTones: voicings, oscTones: voicings.map(v => v.map(midiToFreq)) },
+    // Chord oscillators sound an octave below their MIDI notes, the register
+    // convention of the legacy chord tables and the piano keyboard.
+    chordTones: { midiTones: voicings, oscTones: voicings.map(v => v.map(m => midiToFreq(m - 12))) },
     chordsGroove,
     chordsLocation: chordLocation(bassNoteLocations, bassGroove, chordsGroove),
     sectionId: s.id,

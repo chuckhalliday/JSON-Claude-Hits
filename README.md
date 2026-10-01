@@ -1,3 +1,31 @@
+# JSON Claude Hits
+
+A fork of [JSON Hit Builder](https://github.com/chuckhalliday/JSON-Hit-Builder) rebuilt around a form-first, layer-by-layer workflow: rough out a song framework in blocks, refine it like sculpture, then export it to a DAW to finish.
+
+## Sculpting workflow
+
+1. **Form.** Pick a form template (verse/pre-chorus/chorus, verse/chorus, AABA, 12-bar blues, build/drop). Section lengths are in bars, and each section carries an energy level and a cadence target. An optional target length adds or drops whole verse/chorus cycles.
+2. **Harmony.** Progressions are written first: 4-bar phrases moving tonic -> predominant -> dominant, closing on the section's cadence (authentic, half, plagal, deceptive). Applied dominants, borrowed chords, tritone subs, sevenths and passing inversions are explicit and labelled with Roman numerals. Major, minor, dorian, phrygian, lydian and mixolydian are supported.
+3. **Rhythm.** 2-bar bass motifs, stated and answered (A A B A), plus the drum grid that subdivides them. Triplets are exact.
+4. **Notes.** The bass is realized from the chords (chord bass notes on changes, chord tones, approach notes); chords are voice-led (close, drop-2, shell); drums follow energy, with crashes and fills at section transitions. A guide-tone line (3rds/7ths) is included as a melody scaffold.
+
+Each section is **defined once**. Every repeat references it, so an edit to one verse lands in every verse. Each instance keeps its own energy, an optional final-chorus key lift, and drum overrides inside its fills.
+
+Every layer of every section can be **locked** or **re-rolled** on its own. Re-rolling a layer rebuilds the unlocked layers that depend on it and nothing else. Seeds are derived per section and layer, so re-rolling the chorus drums can't change the verse. Hand edits lock the layer they touch.
+
+**Export MIDI** downloads a type-1 Standard MIDI File: tempo, 4/4, key signature, a marker per section, GM drums on channel 10, bass, chords (with chord-symbol text events), and the guide-tone line. Logic, Cubase, Reaper and others show the section markers on their arrangement timeline.
+
+The original groove-driven generator is still available as the "Classic" engine in the Generate menu.
+
+### Code map
+
+- `src/Core/` is the engine: `doc.ts` (song document), `form.ts`, `harmony.ts`, `rhythm.ts`, `bassline.ts`, `voicing.ts`, `drums.ts`, `generate.ts` (pipeline, re-roll, locks), `edits.ts`, `realize.ts` (document -> the editors' `Part[]` view), `midiFile.ts` / `exportMidi.ts`, `theory.ts`, `time.ts` (960 PPQ ticks), `seeds.ts`.
+- `npm test` runs the Jest suites; `npm run build` type-checks and builds.
+
+---
+
+## Original README
+
 # JSON Hit Builder
 
 Welcome to the JSON Hit Builder, a web application dedicated to music composition and exploration. You can experience it live at [node-composer.vercel.app](https://node-composer.vercel.app). This project was initially inspired by my tinkering with Sonic Pi, a live coding music program written in Ruby for those unfamiliar.

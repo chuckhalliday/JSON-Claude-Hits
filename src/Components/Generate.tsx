@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, ChangeEvent } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { setSong, SongState } from "../reducers";
+import { setSong, SongState, newSong } from "../reducers";
+import type { AppDispatch } from "../store";
 import generateSong from "../SongStructure/generateSong";
+import { FORM_TEMPLATES, DEFAULT_FORM_ID } from "../Core/form";
+import { MODES, MODE_NAMES, Mode } from "../Core/theory";
 import { defaultTuning, normalizeTuning, tuningBounds, genrePresets } from "../SongStructure/tuning";
 import { GenerationTuning } from "../types";
 import Dial from "./Dial";
@@ -33,12 +36,14 @@ const maxLength = 600;
 // Semitone offset each key letter maps to (same values handleKeyChange uses).
 const keyOffsets: { [letter: string]: number } = { A: -3, B: -1, C: 0, D: 2, E: 4, F: -7, G: -5 };
 
-// Parse a stored key string like "D# Minor" back into the menu's key
-// controls. Anything unparseable (no song yet, or a mode the menu can't
-// express) returns null and the controls open blank.
+const MODE_LABELS = MODES.map(m => MODE_NAMES[m]);
+
+// Parse a stored key string like "D# Minor" or "Bb Dorian" back into the
+// menu's key controls. Anything unparseable (no song yet) returns null and
+// the controls open blank.
 function parseKey(keyString: string) {
   const [note, mode] = keyString.split(' ');
-  if (!note || !(note[0] in keyOffsets) || (mode !== 'Major' && mode !== 'Minor')) {
+  if (!note || !(note[0] in keyOffsets) || !MODE_LABELS.includes(mode)) {
     return null;
   }
   const accidental = note[1] === '#' ? '#' : note[1] === 'b' ? '♭' : '♮';
@@ -62,7 +67,9 @@ const defaultArrangement = () => [
 ];
 
 export default function Generate({ onClose, showAdvanced = false }: GenerateProps) {
-  const dispatch = useDispatch()
+  const dispatch = useDispatch<AppDispatch>()
+  // Sculpted songs carry their document; its options pre-load the menu.
+  const doc = useSelector((state: { song: SongState }) => state.song.doc);
   // Pre-load the controls with the recipe that produced the current song
   // (grooves copied: the store freezes its arrays, the menu splices in place).
   // Songs without a stored recipe (e.g. older saves) open the blank state.
@@ -70,9 +77,15 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
   const songKey = useSelector((state: { song: SongState }) => state.song.key);
   const parsedKey = parseKey(songKey);
 
-  const [grooves, setGrooves] = useState(params ? params.grooves.map(groove => [...groove]) : defaultGrooves());
-  const [arrangement, setArrangement] = useState(params ? params.arrangement.map(section => [...section]) : defaultArrangement());
-  const [triplet, setTriplet] = useState(params ? params.triplet : 0.0)
+  // "sculpt" is the form-first engine (src/Core); "classic" is the original
+  // groove-driven generator, kept for its recipes and older saves.
+  const [engine, setEngine] = useState<'sculpt' | 'classic'>(doc || !params ? 'sculpt' : 'classic');
+  const [formId, setFormId] = useState(doc?.formId ?? DEFAULT_FORM_ID);
+  const [liftFinalChorus, setLiftFinalChorus] = useState(doc?.liftFinalChorus ?? false);
+  const [useGrooves, setUseGrooves] = useState(!!doc?.motifs);
+  const [grooves, setGrooves] = useState(doc?.motifs ? doc.motifs.map(groove => [...groove]) : params ? params.grooves.map(groove => [...groove]) : defaultGrooves());
+  const [arrangement, setArrangement] = useState(doc?.arrangement ? doc.arrangement.map(section => [...section]) : params ? params.arrangement.map(section => [...section]) : defaultArrangement());
+  const [triplet, setTriplet] = useState(doc ? doc.triplet : params ? params.triplet : 0.0)
   const [selectedKey, setSelectedKey] = useState(parsedKey?.letter ?? '');
   const [sharpFlat, setSharpFlat] = useState<string>(parsedKey?.accidental ?? '♮')
   const [tonality, setTonality] = useState<string | undefined>(parsedKey?.tonality)
@@ -80,13 +93,13 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
   const [modify, setModify] = useState<number>(parsedKey?.modify ?? 0)
   const [toneModify, setToneModify] = useState<number>(parsedKey?.toneModify ?? 0)
   const [keyAdjust, setKeyAdjust] = useState<number | undefined>()
-  const [bpm, setBpm] = useState<number | undefined>(params?.bpm)
+  const [bpm, setBpm] = useState<number | undefined>(doc?.bpm ?? params?.bpm)
   const [songLength, setSongLength] = useState<number | undefined>(params?.songLength)
   // Advanced-panel dials, resolved from the recipe. normalizeTuning maps
   // recipes from the retired single drum dial, fills fields older saves
   // don't have with the stock defaults, and clamps anything out of bounds,
   // so the dials always open on safe values.
-  const recipeTuning = normalizeTuning(params?.tuning);
+  const recipeTuning = normalizeTuning(doc?.tuning ?? params?.tuning);
   const [tuning, setTuning] = useState<GenerationTuning>(recipeTuning)
   // The Genre picker's current selection, shown alongside the dials. Hand-
   // moving any dial (including a double-click reset) falls back to "Custom" —
@@ -167,13 +180,9 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
   }
 
   const handleTonalityChange = (e: ChangeEvent<HTMLSelectElement>) => {
-    if (e.target.value === 'Major' || e.target.value === 'Minor') {
+    if (MODE_LABELS.includes(e.target.value)) {
       setTonality(e.target.value);
-      if (e.target.value === 'Major') {
-        setToneModify(0)
-      } else if (e.target.value === 'Minor') {
-        setToneModify(3)
-      }
+      setToneModify(e.target.value === 'Minor' ? 3 : 0)
     } else {
       setTonality(undefined)
     }
@@ -193,7 +202,27 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
     value === undefined ? undefined : Math.min(max, Math.max(min, value));
 
   const updateSong = () => {
-    dispatch(setSong(generateSong(grooves, arrangement, triplet, keyAdjust, tonality, clamp(bpm, minBpm, maxBpm), clamp(songLength, minLength, maxLength), tuning)))
+    if (engine === 'sculpt') {
+      const mode = MODES.find(m => MODE_NAMES[m] === tonality) as Mode | undefined;
+      dispatch(newSong({
+        formId,
+        tonic: key !== undefined ? (key + modify + 12) % 12 : undefined,
+        mode: key !== undefined ? mode : undefined,
+        bpm: clamp(bpm, minBpm, maxBpm),
+        targetSeconds: clamp(songLength, minLength, maxLength),
+        triplet,
+        tuning,
+        motifs: useGrooves ? grooves : undefined,
+        arrangement: useGrooves ? arrangement : undefined,
+        liftFinalChorus,
+      }))
+      onClose()
+      return
+    }
+    // The classic engine only knows major/minor; a modal key falls back to
+    // a random one.
+    const classicKey = tonality === 'Major' || tonality === 'Minor';
+    dispatch(setSong(generateSong(grooves, arrangement, triplet, classicKey ? keyAdjust : undefined, classicKey ? tonality : undefined, clamp(bpm, minBpm, maxBpm), clamp(songLength, minLength, maxLength), tuning)))
     onClose()
   }
 
@@ -204,7 +233,7 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
   // is effectively asking for "the same song again", which the un-pinned
   // randomness won't deliver. Compared by value so editing a control and
   // putting it back counts as unchanged.
-  const recipeUnchanged = params != null &&
+  const recipeUnchanged = engine === 'classic' && params != null &&
     sameArrays(grooves, params.grooves) &&
     sameArrays(arrangement, params.arrangement) &&
     triplet === params.triplet &&
@@ -325,8 +354,36 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
       <button onClick={onClose}>x</button>
       <div>
         <h2>Generate New Song <button onClick={resetDefaults} title="Reset to blank defaults">↺</button></h2>
-        <p>~Under Construction~</p>     
-        {grooves.map((groove, grooveIndex) => (
+        <p>
+          Engine:{' '}
+          <select value={engine} onChange={(e) => setEngine(e.target.value as 'sculpt' | 'classic')}>
+            <option value="sculpt">Form-first (sculpt)</option>
+            <option value="classic">Classic (groove-driven)</option>
+          </select>
+        </p>
+        {engine === 'sculpt' && (
+          <>
+            <p>
+              Form:{' '}
+              <select value={formId} onChange={(e) => setFormId(e.target.value)}>
+                {FORM_TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </p>
+            <p>
+              <label>
+                <input type="checkbox" checked={liftFinalChorus} onChange={(e) => setLiftFinalChorus(e.target.checked)} />
+                {' '}Lift the final chorus up a key
+              </label>
+            </p>
+            <p>
+              <label>
+                <input type="checkbox" checked={useGrooves} onChange={(e) => setUseGrooves(e.target.checked)} />
+                {' '}Build bass rhythms from my grooves below (otherwise each section writes its own motif)
+              </label>
+            </p>
+          </>
+        )}
+        {(engine === 'classic' || useGrooves) && grooves.map((groove, grooveIndex) => (
           <div key={grooveIndex}>
             <p>Bass Groove {grooveIndex + 1}:</p>
             <span>
@@ -361,7 +418,7 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
             )}
           </div>
         ))}
-        <div>
+        {(engine === 'classic' || useGrooves) && <div>
             <p>Verse Structure:</p>
             <button onClick={() => incrementPart(arrangement[0][0], 0, 0)}>BG: {arrangement[0][0]+1}</button>
             <button onClick={() => incrementPart(arrangement[0][1], 0, 1)}>BG: {arrangement[0][1]+1}</button>
@@ -379,7 +436,7 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
             <button onClick={() => incrementPart(arrangement[2][1], 2, 1)}>BG: {arrangement[2][1]+1}</button>
             <button onClick={() => incrementPart(arrangement[2][2], 2, 2)}>BG: {arrangement[2][2]+1}</button>
             <button onClick={() => incrementPart(arrangement[2][3], 2, 3)}>BG: {arrangement[2][3]+1}</button>
-        </div>
+        </div>}
         <p>Triplet Frequency:     
           <input
           type="range"
@@ -425,6 +482,7 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
           <select id="tonality" value={tonality} onChange = {handleTonalityChange}>
             <option>Major</option>
             <option>Minor</option>
+            {engine === 'sculpt' && MODE_LABELS.filter(m => m !== 'Major' && m !== 'Minor').map(m => <option key={m}>{m}</option>)}
           </select>
           </p>
         )}
@@ -439,7 +497,7 @@ export default function Generate({ onClose, showAdvanced = false }: GenerateProp
             onChange={(e) => setBpm(e.target.value === '' ? undefined : Number(e.target.value))}
           />
         </p>
-        <p>Song Length (optional):
+        <p title={engine === 'sculpt' ? 'Target length: the form adds or drops whole verse/chorus cycles to get close.' : undefined}>Song Length (optional):
           <input
             className={styles.numberInput}
             type="number"

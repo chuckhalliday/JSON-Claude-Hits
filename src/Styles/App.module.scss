@@ -452,3 +452,141 @@ input[type="range"].bpm::-moz-range-thumb {
   .resize {
     height: 30px;
   }
+// Arrangement blocks: the part buttons double as the song's timeline.
+.partButton {
+    position: relative;
+    overflow: hidden;
+    white-space: nowrap;
+
+    sup {
+      font-size: 9px;
+      margin-left: 1px;
+    }
+}
+
+.energyBar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    background-color: #4281b2;
+    pointer-events: none;
+}
+
+// Section panel: progression, layer locks/re-rolls, instance energy.
+.sectionPanel {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border: 1px solid #e2e6ea;
+    border-radius: 6px;
+    background-color: #fafbfc;
+    font-size: 13px;
+}
+
+.sectionHeader {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 4px;
+    color: #555;
+
+    strong {
+      color: #222;
+    }
+}
+
+.energyControl {
+    display: flex;
+    align-items: center;
+    column-gap: 6px;
+    margin-left: auto;
+}
+
+.progression {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 8px 0;
+}
+
+.chordCell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    flex-basis: 48px;
+    padding: 3px 6px;
+    border-left: 2px solid #4281b2;
+    background-color: #fff;
+}
+
+.chordSymbol {
+    font-weight: 700;
+    color: #222;
+}
+
+.chordRoman {
+    font-size: 11px;
+    color: #4281b2;
+}
+
+.guideTone {
+    font-size: 10px;
+    color: #888;
+}
+
+.layerRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+}
+
+.layerControl {
+    display: inline-flex;
+    align-items: center;
+    column-gap: 4px;
+}
+
+.lockButton {
+    border: 1px solid #ccc;
+    background: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 12px;
+}
+
+.locked {
+    background-color: #fff3cd;
+    border-color: #d9a300;
+}
+
+.rerollButton {
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    background-color: rgb(71, 182, 71);
+    color: black;
+
+    &:hover:not(:disabled) {
+      background-color: #4281b2;
+    }
+
+    &:disabled {
+      background-color: #e5e5e5;
+      color: #999;
+      cursor: not-allowed;
+    }
+}
+
+.layerNote {
+    font-size: 11px;
+    color: #888;
+}
+
+.sectionNote {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: #888;
+}
