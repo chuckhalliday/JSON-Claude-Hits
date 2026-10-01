@@ -565,8 +565,17 @@ function App() {
               </button>
               {isOpen && currentPart === index && (
                 <div className={styles.openedPart}>
-                  <h3>{songProps.type} ({songProps.repeat})</h3>
-                  <SectionPanel part={index} />
+                  {/* The title and section controls stay in view while the
+                      staff and grid scroll sideways (by hand or following
+                      playback). Sticky only travels within its parent, so
+                      the parent spans the full scrollable width - the same
+                      arrangement as the staff's Staff/Tab toggle. */}
+                  <div style={{ width: renderWidth ? `max(${renderWidth}px, 100%)` : '100%' }}>
+                    <div className={styles.stickyHeader}>
+                      <h3>{songProps.type} ({songProps.repeat})</h3>
+                      <SectionPanel part={index} />
+                    </div>
+                  </div>
                   <BassStaff
                     ref={bassStaffRef}
                     renderWidth={renderWidth}
