@@ -2,7 +2,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { SongState, rerollLayer, toggleLock, setPartEnergy, setLoop } from "../reducers";
 import { clampRegion, partBars } from "../Playback/loop";
 import { Layer, LAYERS, LAYER_DEPENDENTS } from "../Core/doc";
-import { spellPc, spelledName } from "../Core/theory";
+import { spellInChord, spellPc, spelledName } from "../Core/theory";
 import { transposedKey } from "../Core/realize";
 import styles from "../Styles/App.module.scss";
 
@@ -65,7 +65,7 @@ export default function SectionPanel({ part }: SectionPanelProps) {
             <span className={styles.chordSymbol}>{chord}</span>
             <span className={styles.chordRoman}>{p.roman?.[i]}</span>
             {p.guideTones?.[i] ? (
-              <span className={styles.guideTone} title="Guide tone (3rd/7th)">{spelledName(spellPc(p.guideTones[i], key))}</span>
+              <span className={styles.guideTone} title="Guide tone (3rd/7th)">{spelledName(section.harmony[i] ? spellInChord(p.guideTones[i], section.harmony[i], key) : spellPc(p.guideTones[i], key))}</span>
             ) : null}
           </span>
         ))}

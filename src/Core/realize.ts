@@ -6,9 +6,10 @@
 // the document stays the source of truth and the Part tree is a view.
 
 import { SongDoc, SectionDef, SectionInstance } from './doc';
-import { Key, chordSymbol, romanNumeral, spellPc, spelledName, staffY, midiToFreq, mod12, BASS_MIN, BASS_MAX, VOICING_MAX, VOICING_MIN } from './theory';
+import { Key, chordSymbol, romanNumeral, spellInChord, spelledName, staffY, midiToFreq, mod12, BASS_MIN, BASS_MAX, VOICING_MAX, VOICING_MIN } from './theory';
 import { stepsToLegacyBeats, ticksToBeats } from './time';
 import { instanceDrums } from './drums';
+import { chordAt } from './bassline';
 import { streamFor } from './seeds';
 import { bassMeasures } from '../SongStructure/bass';
 import { chordLocation } from '../SongStructure/chords';
@@ -67,6 +68,8 @@ export function realizeInstance(doc: SongDoc, i: number, repeat: number): Part {
   const [bassGrid, measureLines] = bassMeasures(bassGroove, drumGroove);
 
   const bassMidi = s.bass.map(m => shiftBass(m, inst.transpose));
+  const bassOnsets: number[] = [];
+  s.bassRhythm.reduce((pos, d) => (bassOnsets.push(pos), pos + d), 0);
   const bass: string[] = [];
   const bassNoteLocations: NoteLocation[] = bassMidi.map((midi, k) => {
     const x = bassGrid[k + 1];
@@ -74,7 +77,8 @@ export function realizeInstance(doc: SongDoc, i: number, repeat: number): Part {
       bass.push('-');
       return { x, y: -20, acc: 'none', ...bassPitch(-20, 'none') };
     }
-    const spelled = spellPc(midi, key);
+    // Spelled against the chord it sounds under (F# over D in G minor).
+    const spelled = spellInChord(midi, chordAt(s.harmony, bassOnsets[k]), key);
     bass.push(spelledName(spelled));
     const acc = spelled.acc > 0 ? 'sharp' : spelled.acc < 0 ? 'flat' : 'none';
     const y = staffY(midi, spelled);

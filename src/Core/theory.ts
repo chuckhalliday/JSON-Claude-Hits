@@ -87,12 +87,56 @@ export function spellPc(pc: number, key: Key): Spelled {
   for (const s of scale) {
     if (mod12(LETTER_PC[LETTERS.indexOf(s.letter)] + s.acc) === pc) return tidy(s);
   }
-  const preferFlats = keySignature(key) < 0;
   const natural = LETTER_PC.indexOf(pc);
   if (natural !== -1) return { letter: LETTERS[natural], acc: 0 };
+  // Minor keys raise their 6th and 7th (melodic/harmonic minor): F# in G
+  // minor is the leading tone, not Gb.
+  if (key.mode === 'minor') {
+    const rel = mod12(pc - key.tonic);
+    if (rel === 9 || rel === 11) {
+      const degree = scale[rel === 9 ? 5 : 6];
+      return tidy({ letter: degree.letter, acc: degree.acc + 1 });
+    }
+  }
+  const preferFlats = keySignature(key) < 0;
   return preferFlats
     ? { letter: LETTERS[LETTER_PC.indexOf(mod12(pc + 1))], acc: -1 }
     : { letter: LETTERS[LETTER_PC.indexOf(mod12(pc - 1))], acc: 1 };
+}
+
+// A chord root, `rel` semitones above the tonic. Chromatic roots are read as
+// lowered scale degrees - bII, bIII, bVI, bVII - as borrowed chords and
+// tritone subs are named: Ab (bVI) in C major, not G#.
+export function spellRoot(rel: number, key: Key): Spelled {
+  const scale = keyScale(key);
+  const steps = MODE_STEPS[key.mode];
+  const r = mod12(rel);
+  const degree = steps.indexOf(r);
+  if (degree !== -1) return tidy(scale[degree]);
+  const above = steps.indexOf(mod12(r + 1));
+  if (above !== -1 && Math.abs(scale[above].acc - 1) <= 1) {
+    return tidy({ letter: scale[above].letter, acc: scale[above].acc - 1 });
+  }
+  return spellPc(key.tonic + r, key);
+}
+
+// Letter steps above a chord root for each interval (in semitones), so chord
+// tones are spelled as thirds/fifths/sevenths of the root: D major's third
+// is F#, A7's is C#, B°'s fifth is F.
+const INTERVAL_LETTER_STEPS: Record<number, number> = { 0: 0, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 4, 9: 6, 10: 6, 11: 6 };
+
+// Spell a pitch heard against a chord: chord tones by their interval from
+// the chord's root, anything else (passing/approach notes) by the key.
+export function spellInChord(pc: number, chord: Pick<ChordEvent, 'root' | 'quality'>, key: Key): Spelled {
+  const rel = mod12(pc - key.tonic);
+  const intervals = QUALITY_INTERVALS[chord.quality];
+  const k = intervals.findIndex(i => mod12(chord.root + i) === rel);
+  if (k === -1) return spellPc(pc, key);
+  const root = spellRoot(chord.root, key);
+  const letterIndex = (LETTERS.indexOf(root.letter) + INTERVAL_LETTER_STEPS[intervals[k]]) % 7;
+  const acc = accFor(letterIndex, pc);
+  if (Math.abs(acc) > 1) return spellPc(pc, key);
+  return tidy({ letter: LETTERS[letterIndex], acc });
 }
 
 function tidy(s: Spelled): Spelled {
@@ -142,10 +186,10 @@ export const chordBassPc = (c: Pick<ChordEvent, 'root' | 'quality' | 'inversion'
 export const hasSeventh = (q: Quality) => QUALITY_INTERVALS[q].length === 4;
 
 export function chordSymbol(c: ChordEvent, key: Key): string {
-  const root = spelledName(spellPc(key.tonic + c.root, key));
+  const root = spelledName(spellRoot(c.root, key));
   const base = root + SYMBOL_SUFFIX[c.quality];
   if (c.inversion === 0) return base;
-  return `${base}/${spelledName(spellPc(key.tonic + chordBassPc(c), key))}`;
+  return `${base}/${spelledName(spellInChord(key.tonic + chordBassPc(c), c, key))}`;
 }
 
 // Roman numerals, read against the major scale so chromatic roots get a

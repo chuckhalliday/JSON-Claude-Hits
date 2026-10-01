@@ -2,7 +2,7 @@ import { generateDoc, regenerateLayer, setLock, setInstanceEnergy } from './gene
 import { realizeSong, realizeSection } from './realize';
 import { editBass, editChordTone, editDrum } from './edits';
 import { FORM_TEMPLATES, formTemplate, resolveOrder } from './form';
-import { keyName, keyScale, spelledName, spellPc, chordTones, chordBassPc, MODES, Mode, romanNumeral, BASS_MIN, BASS_MAX, VOICING_MIN, VOICING_MAX, ChordEvent } from './theory';
+import { keyName, keyScale, spelledName, spellPc, spellInChord, chordSymbol, chordTones, chordBassPc, MODES, Mode, romanNumeral, BASS_MIN, BASS_MAX, VOICING_MIN, VOICING_MAX, ChordEvent } from './theory';
 import { normalizeMotif } from './rhythm';
 import { songToMidi, parseKeyString } from './exportMidi';
 import { readMidiFile } from './midiFile';
@@ -32,6 +32,21 @@ describe('theory', () => {
         }
       }
     }
+  });
+
+  it('spells chord tones from the chord root and raises 6/7 in minor', () => {
+    const gMinor = { tonic: 7, mode: 'minor' as Mode };
+    const d = { root: 7, quality: 'maj' as const };
+    expect(spelledName(spellInChord(6, d, gMinor))).toBe('F#');
+    expect(spelledName(spellPc(6, gMinor))).toBe('F#');
+    // D7 (V7/V) in C: its third is F#.
+    expect(spelledName(spellInChord(6, { root: 2, quality: '7' }, { tonic: 0, mode: 'major' }))).toBe('F#');
+    // A7 (V7/ii) in C: C# not Db. Borrowed bVI in C is Ab (with Eb), not G#.
+    expect(spelledName(spellInChord(1, { root: 9, quality: '7' }, { tonic: 0, mode: 'major' }))).toBe('C#');
+    expect(spelledName(spellInChord(3, { root: 8, quality: 'maj' }, { tonic: 0, mode: 'major' }))).toBe('Eb');
+    expect(chordSymbol({ start: 0, dur: 1, root: 7, quality: 'maj', inversion: 1, fn: 'D' }, gMinor)).toBe('D/F#');
+    expect(chordSymbol({ start: 0, dur: 1, root: 8, quality: 'maj', inversion: 0, fn: 'PD' }, { tonic: 0, mode: 'major' })).toBe('Ab');
+    expect(chordSymbol({ start: 0, dur: 1, root: 1, quality: '7', inversion: 0, fn: 'D' }, { tonic: 0, mode: 'major' })).toBe('Db7');
   });
 
   it('labels Roman numerals against the mode', () => {
