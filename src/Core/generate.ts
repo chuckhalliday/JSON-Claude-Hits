@@ -164,23 +164,51 @@ export function regenerateLayer(doc: SongDoc, id: string, layer: Layer): SongDoc
   return { ...doc, sections: { ...doc.sections, [id]: s }, form };
 }
 
-// Give one part its own copy of its section, so edits and re-rolls made to
-// it leave the section's other instances alone ("this part only"). A part
-// that is already the only instance of its section is returned as is.
-export function detachInstance(doc: SongDoc, index: number): { doc: SongDoc, sectionId: string } {
+// Sections a detached part copies are named after the original: verse~2.
+export const baseSectionId = (id: string) => id.replace(/~\d+$/, '');
+
+export const isDetached = (doc: SongDoc, index: number) => {
+  const inst = doc.form[index];
+  return !!inst && (inst.detached ?? inst.sectionId !== baseSectionId(inst.sectionId));
+};
+
+// How many parts play the section this part is (or would be) linked to.
+export const linkedCount = (doc: SongDoc, index: number) => {
+  const inst = doc.form[index];
+  if (!inst) return 0;
+  const base = baseSectionId(inst.sectionId);
+  return doc.form.filter((f, i) => f.sectionId === base || i === index).length;
+};
+
+// "This part only": give one part its own copy of its section, so edits and
+// re-rolls made to it leave the section's other instances alone. Only this
+// part is affected; the others stay linked to each other.
+export function detachInstance(doc: SongDoc, index: number): SongDoc {
   const inst = doc.form[index];
   const section = inst && doc.sections[inst.sectionId];
-  if (!section) return { doc, sectionId: inst?.sectionId ?? '' };
-  if (doc.form.filter(f => f.sectionId === section.id).length <= 1) return { doc, sectionId: section.id };
-  const base = section.id.replace(/~\d+$/, '');
+  if (!section) return doc;
+  const markDetached = (sectionId: string) => doc.form.map((f, i) => (i === index ? { ...f, sectionId, detached: true } : f));
+  // The section's only part needs no copy - just remember the choice.
+  if (doc.form.filter(f => f.sectionId === section.id).length <= 1) return { ...doc, form: markDetached(section.id) };
+  const base = baseSectionId(section.id);
   let n = 2;
   while (doc.sections[`${base}~${n}`]) n++;
   const id = `${base}~${n}`;
-  const copy: SectionDef = { ...cloneSection(section), id };
-  return {
-    doc: { ...doc, sections: { ...doc.sections, [id]: copy }, form: doc.form.map((f, i) => (i === index ? { ...f, sectionId: id } : f)) },
-    sectionId: id,
-  };
+  return { ...doc, sections: { ...doc.sections, [id]: { ...cloneSection(section), id } }, form: markDetached(id) };
+}
+
+// "All linked": put this part back on its original section, carrying its
+// current state there - so every part linked to that section now matches
+// it - and drop the copy it was playing.
+export function relinkInstance(doc: SongDoc, index: number): SongDoc {
+  const inst = doc.form[index];
+  const section = inst && doc.sections[inst.sectionId];
+  if (!section) return doc;
+  const base = baseSectionId(section.id);
+  const sections = { ...doc.sections, [base]: { ...cloneSection(section), id: base } };
+  if (section.id !== base) delete sections[section.id];
+  const form = doc.form.map((f, i) => (i === index ? { ...f, sectionId: base, detached: false } : f));
+  return { ...doc, sections, form };
 }
 
 export function setLock(doc: SongDoc, id: string, layer: Layer, locked: boolean): SongDoc {

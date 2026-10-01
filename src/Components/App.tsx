@@ -13,7 +13,8 @@ import { useSelector, useDispatch } from "react-redux"
 import { playVerse } from '../Playback/playSong';
 import { getAudioContext } from '../Playback/audioContext';
 import { useLampStep } from '../Playback/useLampStep';
-import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setEditScope } from '../reducers';
+import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setPartLinked } from '../reducers';
+import { isDetached, linkedCount } from '../Core/generate';
 import { beatsInPart, clampRegion, containsPoint, describePoint, partWindow, stepBeat, sum, trackWindow } from '../Playback/loop';
 import type { AppDispatch } from '../store'
 import styles from "../Styles/App.module.scss"
@@ -583,23 +584,25 @@ function App() {
                       <div className={styles.partTitleRow}>
                         <h3>{songProps.type} ({songProps.repeat})</h3>
                         {song.doc && songProps.sectionId && (() => {
-                          const sharing = song.doc.form.filter(f => f.sectionId === songProps.sectionId).length;
-                          const partOnly = song.editScope === 'part';
+                          const sharing = linkedCount(song.doc, index);
+                          const partOnly = isDetached(song.doc, index);
                           return (
                             <div className={styles.scopeToggle} role="group" aria-label="Which parts edits change">
                               <button
                                 className={!partOnly ? styles.scopeOn : ''}
                                 aria-pressed={!partOnly}
-                                onClick={() => dispatch(setEditScope('all'))}
-                                title={`Edits change this ${songProps.type.toLowerCase()} everywhere it plays`}
+                                onClick={() => partOnly && dispatch(setPartLinked({ part: index, linked: true }))}
+                                title={partOnly
+                                  ? `Re-link: every linked ${songProps.type.toLowerCase()} takes on this part's current state`
+                                  : `Edits change this ${songProps.type.toLowerCase()} everywhere it plays`}
                               >
                                 All linked{sharing > 1 ? ` (${sharing})` : ''}
                               </button>
                               <button
                                 className={partOnly ? styles.scopeOn : ''}
                                 aria-pressed={partOnly}
-                                onClick={() => dispatch(setEditScope('part'))}
-                                title="Edits change only the open part, which gets its own copy of the section"
+                                onClick={() => !partOnly && dispatch(setPartLinked({ part: index, linked: false }))}
+                                title="Edits change only this part (it gets its own copy of the section); other parts stay linked"
                               >
                                 This part only
                               </button>

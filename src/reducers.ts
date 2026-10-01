@@ -2,7 +2,7 @@ import { createSlice, PayloadAction, Dispatch, current } from "@reduxjs/toolkit"
 import { SongStructure, NoteLocation, DrumHit, SongParams } from "./types";
 import { bassPitch } from "./SongStructure/bassPitch";
 import { SongDoc, Layer, GenerateOptions } from "./Core/doc";
-import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance, detachInstance } from "./Core/generate";
+import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance, detachInstance, relinkInstance } from "./Core/generate";
 import { realizeSong, realizeSection, realizeInstance, assignStepIds } from "./Core/realize";
 import { editBass, editDrum, editChordTone, editChord } from "./Core/edits";
 import { ChordEvent } from "./Core/theory";
@@ -32,11 +32,7 @@ export interface SongState {
     // number sets, and the item picked as the start (so the end pick can
     // complete the region from it).
     loopPick?: 'start' | 'end' | null,
-    loopAnchor?: LoopSpan | null,
-    // 'all': edits to a part change its section everywhere it plays (the
-    // default). 'part': they change only the open part, which is detached
-    // onto its own copy of the section on its first edit.
-    editScope?: 'all' | 'part'
+    loopAnchor?: LoopSpan | null
 }
 
 // The song tree starts empty and deterministic. The first song is produced by
@@ -56,8 +52,7 @@ const initialState: SongState = {
     loop: null,
     loopEnabled: false,
     loopPick: null,
-    loopAnchor: null,
-    editScope: 'all'
+    loopAnchor: null
 };
 
 // Everything setSong needs to load a sculpted document.
@@ -79,13 +74,12 @@ function applyDoc(state: SongState, doc: SongDoc, sectionId?: string) {
   state.songStructure = sectionId ? realizeSection(doc, parts, sectionId) : realizeSong(doc);
 }
 
-// The document and section an edit to `part` should land on. In "this part
-// only" scope the part is first detached onto its own copy of the section.
+// The document and section an edit to `part` lands on: the section the part
+// plays - shared with its linked parts, or its own copy if detached.
 const docFor = (state: SongState, part: number) => {
   const doc = state.doc ? current(state).doc! : null;
   const sectionId = state.songStructure[part]?.sectionId;
-  if (!doc || !sectionId || doc.form[part]?.sectionId !== sectionId) return null;
-  return state.editScope === 'part' ? detachInstance(doc, part) : { doc, sectionId };
+  return doc && sectionId && doc.form[part]?.sectionId === sectionId ? { doc, sectionId } : null;
 };
 
 const song = createSlice({
@@ -257,8 +251,14 @@ const song = createSlice({
         const locked = !doc.sections[sectionId]?.locks[action.payload.layer];
         applyDoc(state, setLock(doc, sectionId, action.payload.layer, locked), sectionId);
       },
-      setEditScope: (state, action: PayloadAction<'all' | 'part'>) => {
-        state.editScope = action.payload;
+      // "This part only" (linked: false) detaches one part onto its own copy
+      // of its section; "All linked" (linked: true) re-links it, and every
+      // part sharing that section takes on this part's current state.
+      setPartLinked: (state, action: PayloadAction<{ part: number, linked: boolean }>) => {
+        if (!state.doc) return;
+        const { part, linked } = action.payload;
+        const doc = current(state).doc!;
+        applyDoc(state, linked ? relinkInstance(doc, part) : detachInstance(doc, part));
       },
       // Energy of one instance: reshapes its drums and transitions only.
       setPartEnergy: (state, action: PayloadAction<{ index: number, energy: number }>) => {
@@ -280,7 +280,7 @@ const song = createSlice({
     },
   });
 
-export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony, setEditScope } = song.actions;
+export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony, setPartLinked } = song.actions;
 
 // Thunk: generate a fresh form-first song and load it into the store.
 // Dispatched on mount and by the song tabs. Pass a seed (or full options)

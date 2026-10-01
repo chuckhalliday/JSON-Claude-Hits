@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { SongState, rerollLayer, toggleLock, setPartEnergy, setLoop, editHarmony } from "../reducers";
 import ChordMenu, { ChordMenuKind } from "./ChordMenu";
 import { inversionOptions } from "../Core/chordOptions";
+import { isDetached } from "../Core/generate";
 import { clampRegion, comparePoints, sum } from "../Playback/loop";
 import { Layer, LAYERS, LAYER_DEPENDENTS } from "../Core/doc";
 import { spellInChord, spellPc, spelledName } from "../Core/theory";
@@ -121,8 +122,8 @@ export default function SectionPanel({ part }: SectionPanelProps) {
         })}
       </div>
       <p className={styles.sectionNote}>
-        Click a chord, its numeral or its bass note to change it. {song.editScope === 'part'
-          ? <>Edits and re-rolls change only this part{plays > 1 ? ` (it gets its own copy of the ${section.label.toLowerCase()} on the first one)` : ''}, and lock that layer.</>
+        Click a chord, its numeral or its bass note to change it. {isDetached(doc, part)
+          ? <>This part is detached: edits and re-rolls change only it, and lock that layer. Switch to All linked to copy its state to every linked {section.label.toLowerCase()}.</>
           : <>Edits here apply to every {section.label.toLowerCase()}{plays > 1 ? ` (${plays} parts)` : ''} and lock that layer.</>} Drum edits inside a fill or crash stay on this instance.
       </p>
     </div>

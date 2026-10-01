@@ -69,6 +69,9 @@ export interface SectionInstance {
   energy: number;
   transpose: number; // semitones, e.g. a final-chorus lift
   drumOverrides: DrumOverride[];
+  // "This part only": the instance plays its own copy of its section, so
+  // edits to it don't reach the section's other instances.
+  detached?: boolean;
 }
 
 export interface FormEntry {
