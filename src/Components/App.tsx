@@ -13,7 +13,7 @@ import { useSelector, useDispatch } from "react-redux"
 import { playVerse } from '../Playback/playSong';
 import { getAudioContext } from '../Playback/audioContext';
 import { useLampStep } from '../Playback/useLampStep';
-import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setPartLinked } from '../reducers';
+import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setPartLinked, duplicatePart, deletePart } from '../reducers';
 import { isDetached, linkedCount } from '../Core/generate';
 import { beatsInPart, clampRegion, containsPoint, describePoint, partWindow, stepBeat, sum, trackWindow } from '../Playback/loop';
 import type { AppDispatch } from '../store'
@@ -457,6 +457,50 @@ function App() {
     setCurrentPart(-1);
   };
 
+ // Menu of the open part's block: duplicate it into the next slot, delete
+ // it, or close it. Positioned against the window, since the parts row
+ // clips anything that overflows it.
+ const [partMenu, setPartMenu] = useState<{ index: number, left: number, top: number } | null>(null);
+ const partMenuRef = React.useRef<HTMLDivElement>(null);
+ useEffect(() => {
+   if (!partMenu) return;
+   const onDown = (e: MouseEvent) => {
+     const target = e.target as HTMLElement;
+     if (partMenuRef.current?.contains(target) || target.closest('[aria-haspopup="menu"]')) return;
+     setPartMenu(null);
+   };
+   const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPartMenu(null); };
+   document.addEventListener('mousedown', onDown);
+   window.addEventListener('keydown', onKey);
+   return () => {
+     document.removeEventListener('mousedown', onDown);
+     window.removeEventListener('keydown', onKey);
+   };
+ }, [partMenu]);
+
+ // Structure edits stop playback first - the running chain is indexed by part.
+ const stopForEdit = () => {
+   if (isPlaying) {
+     stopRef.current = true;
+     manualSeekEpochRef.current++;
+     dispatch(setIsPlaying({ isPlaying: false }));
+   }
+ };
+
+ const handleDuplicatePart = (index: number) => {
+   stopForEdit();
+   setPartMenu(null);
+   dispatch(duplicatePart(index));
+   showPart(index + 1);
+ };
+
+ const handleDeletePart = (index: number) => {
+   stopForEdit();
+   setPartMenu(null);
+   dispatch(deletePart(index));
+   showPart(Math.max(0, Math.min(index, song.songStructure.length - 2)));
+ };
+
  const handleStartClick = () => {
     if (isPlaying) {
       stopRef.current = true;
@@ -550,7 +594,17 @@ function App() {
           return (
             <div key={key} className={styles.parts}>
               <button
-                onClick={() => handlePartOpen(key)}
+                onClick={(e) => {
+                  // Clicking the open part's block opens its menu instead.
+                  if (isOpen && currentPart === index) {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setPartMenu(partMenu?.index === index ? null : { index, left: r.left, top: r.bottom + 4 });
+                  } else {
+                    setPartMenu(null);
+                    handlePartOpen(key);
+                  }
+                }}
+                aria-haspopup={isOpen && currentPart === index ? 'menu' : undefined}
                 draggable
                 onDragStart={() => handlePartDragStart(index)}
                 onDragOver={(e) => handlePartDragOver(e, index)}
@@ -634,6 +688,26 @@ function App() {
           );
         })}
         </div>
+        {partMenu && song.songStructure[partMenu.index] && (
+          <div ref={partMenuRef} className={styles.partMenu} style={{ left: partMenu.left, top: partMenu.top }} role="menu">
+            <div className={styles.partMenuTitle}>{song.songStructure[partMenu.index].type} ({song.songStructure[partMenu.index].repeat})</div>
+            <button role="menuitem" onClick={() => handleDuplicatePart(partMenu.index)} title="Insert a copy right after this part (linked to it, like any repeat)">
+              Duplicate →
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => handleDeletePart(partMenu.index)}
+              disabled={song.songStructure.length <= 1}
+              className={styles.partMenuDanger}
+              title="Remove this part from the song"
+            >
+              Delete
+            </button>
+            <button role="menuitem" onClick={() => { setPartMenu(null); handlePartOpen(`${partMenu.index}`); }}>
+              Close part
+            </button>
+          </div>
+        )}
         <div className={styles.info}>
           {showInfoScreen && !anyPartOpen && <Info />}
         </div>

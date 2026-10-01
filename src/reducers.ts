@@ -2,7 +2,7 @@ import { createSlice, PayloadAction, Dispatch, current } from "@reduxjs/toolkit"
 import { SongStructure, NoteLocation, DrumHit, SongParams } from "./types";
 import { bassPitch } from "./SongStructure/bassPitch";
 import { SongDoc, Layer, GenerateOptions } from "./Core/doc";
-import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance, detachInstance, relinkInstance } from "./Core/generate";
+import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance, detachInstance, relinkInstance, duplicateInstance, deleteInstance } from "./Core/generate";
 import { realizeSong, realizeSection, realizeInstance, assignStepIds } from "./Core/realize";
 import { editBass, editDrum, editChordTone, editChord } from "./Core/edits";
 import { ChordEvent } from "./Core/theory";
@@ -81,6 +81,33 @@ const docFor = (state: SongState, part: number) => {
   const sectionId = state.songStructure[part]?.sectionId;
   return doc && sectionId && doc.form[part]?.sectionId === sectionId ? { doc, sectionId } : null;
 };
+
+// Classic songs (no document): number each part type's repeats in order
+// and lay the step ids out again after parts are added or removed.
+function renumberParts(parts: SongStructure): SongStructure {
+  const counts: Record<string, number> = {};
+  return assignStepIds(parts.map(p => {
+    counts[p.type] = (counts[p.type] ?? 0) + 1;
+    return { ...p, repeat: counts[p.type] };
+  }));
+}
+
+// After a part is inserted at / removed from `index`, keep the playhead on
+// the same part (or its nearest neighbour), and drop the loop - its points
+// are part positions.
+function afterStructureChange(state: SongState, index: number, delta: 1 | -1) {
+  const [part] = state.selectedBeat;
+  const count = state.songStructure.length;
+  if (delta === 1 && part > index) state.selectedBeat = [part + 1, ...state.selectedBeat.slice(1)];
+  if (delta === -1) {
+    if (part === index) state.selectedBeat = [Math.min(index, count - 1), 0, 0, 0];
+    else if (part > index) state.selectedBeat = [part - 1, ...state.selectedBeat.slice(1)];
+  }
+  state.loop = null;
+  state.loopEnabled = false;
+  state.loopPick = null;
+  state.loopAnchor = null;
+}
 
 const song = createSlice({
     name: "song",
@@ -254,6 +281,30 @@ const song = createSlice({
       // "This part only" (linked: false) detaches one part onto its own copy
       // of its section; "All linked" (linked: true) re-links it, and every
       // part sharing that section takes on this part's current state.
+      // Copy a part into the slot right after it (linked to the original).
+      duplicatePart: (state, action: PayloadAction<number>) => {
+        const index = action.payload;
+        if (index < 0 || index >= state.songStructure.length) return;
+        if (state.doc && state.doc.form.length === state.songStructure.length) {
+          applyDoc(state, duplicateInstance(current(state).doc!, index));
+        } else {
+          const parts = current(state).songStructure;
+          const copy = JSON.parse(JSON.stringify(parts[index]));
+          state.songStructure = renumberParts([...parts.slice(0, index + 1), copy, ...parts.slice(index + 1)]);
+        }
+        afterStructureChange(state, index, 1);
+      },
+      // Remove a part (the song always keeps at least one).
+      deletePart: (state, action: PayloadAction<number>) => {
+        const index = action.payload;
+        if (index < 0 || index >= state.songStructure.length || state.songStructure.length <= 1) return;
+        if (state.doc && state.doc.form.length === state.songStructure.length) {
+          applyDoc(state, deleteInstance(current(state).doc!, index));
+        } else {
+          state.songStructure = renumberParts(current(state).songStructure.filter((_, i) => i !== index));
+        }
+        afterStructureChange(state, index, -1);
+      },
       setPartLinked: (state, action: PayloadAction<{ part: number, linked: boolean }>) => {
         if (!state.doc) return;
         const { part, linked } = action.payload;
@@ -280,7 +331,7 @@ const song = createSlice({
     },
   });
 
-export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony, setPartLinked } = song.actions;
+export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony, setPartLinked, duplicatePart, deletePart } = song.actions;
 
 // Thunk: generate a fresh form-first song and load it into the store.
 // Dispatched on mount and by the song tabs. Pass a seed (or full options)

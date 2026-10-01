@@ -211,6 +211,26 @@ export function relinkInstance(doc: SongDoc, index: number): SongDoc {
   return { ...doc, sections, form };
 }
 
+// Insert a copy of a part right after it. The copy plays the same section,
+// so it's linked to the original (and its other instances) like any repeat.
+export function duplicateInstance(doc: SongDoc, index: number): SongDoc {
+  const inst = doc.form[index];
+  if (!inst) return doc;
+  const copy = { ...inst, drumOverrides: inst.drumOverrides.map(o => ({ ...o })) };
+  return { ...doc, form: [...doc.form.slice(0, index + 1), copy, ...doc.form.slice(index + 1)] };
+}
+
+// Remove a part from the form (never the last one). A section no part plays
+// any more is dropped.
+export function deleteInstance(doc: SongDoc, index: number): SongDoc {
+  const inst = doc.form[index];
+  if (!inst || doc.form.length <= 1) return doc;
+  const form = doc.form.filter((_, i) => i !== index);
+  const sections = { ...doc.sections };
+  if (!form.some(f => f.sectionId === inst.sectionId)) delete sections[inst.sectionId];
+  return { ...doc, sections, form };
+}
+
 export function setLock(doc: SongDoc, id: string, layer: Layer, locked: boolean): SongDoc {
   const s = doc.sections[id];
   if (!s) return doc;
