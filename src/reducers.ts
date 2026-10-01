@@ -2,7 +2,7 @@ import { createSlice, PayloadAction, Dispatch, current } from "@reduxjs/toolkit"
 import { SongStructure, NoteLocation, DrumHit, SongParams } from "./types";
 import { bassPitch } from "./SongStructure/bassPitch";
 import { SongDoc, Layer, GenerateOptions } from "./Core/doc";
-import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance } from "./Core/generate";
+import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance, detachInstance } from "./Core/generate";
 import { realizeSong, realizeSection, realizeInstance, assignStepIds } from "./Core/realize";
 import { editBass, editDrum, editChordTone, editChord } from "./Core/edits";
 import { ChordEvent } from "./Core/theory";
@@ -32,7 +32,11 @@ export interface SongState {
     // number sets, and the item picked as the start (so the end pick can
     // complete the region from it).
     loopPick?: 'start' | 'end' | null,
-    loopAnchor?: LoopSpan | null
+    loopAnchor?: LoopSpan | null,
+    // 'all': edits to a part change its section everywhere it plays (the
+    // default). 'part': they change only the open part, which is detached
+    // onto its own copy of the section on its first edit.
+    editScope?: 'all' | 'part'
 }
 
 // The song tree starts empty and deterministic. The first song is produced by
@@ -52,7 +56,8 @@ const initialState: SongState = {
     loop: null,
     loopEnabled: false,
     loopPick: null,
-    loopAnchor: null
+    loopAnchor: null,
+    editScope: 'all'
 };
 
 // Everything setSong needs to load a sculpted document.
@@ -74,10 +79,13 @@ function applyDoc(state: SongState, doc: SongDoc, sectionId?: string) {
   state.songStructure = sectionId ? realizeSection(doc, parts, sectionId) : realizeSong(doc);
 }
 
+// The document and section an edit to `part` should land on. In "this part
+// only" scope the part is first detached onto its own copy of the section.
 const docFor = (state: SongState, part: number) => {
   const doc = state.doc ? current(state).doc! : null;
   const sectionId = state.songStructure[part]?.sectionId;
-  return doc && sectionId && doc.form[part]?.sectionId === sectionId ? { doc, sectionId } : null;
+  if (!doc || !sectionId || doc.form[part]?.sectionId !== sectionId) return null;
+  return state.editScope === 'part' ? detachInstance(doc, part) : { doc, sectionId };
 };
 
 const song = createSlice({
@@ -234,14 +242,23 @@ const song = createSlice({
         applyDoc(state, editChord(sculpted.doc, part, chord, change), sculpted.sectionId);
       },
       // Re-roll one layer of one section (unlocked dependents follow).
-      rerollLayer: (state, action: PayloadAction<{ sectionId: string, layer: Layer }>) => {
+      // With `part` given, the edit scope decides whether that part's whole
+      // section or just the part is re-rolled / locked.
+      rerollLayer: (state, action: PayloadAction<{ sectionId: string, layer: Layer, part?: number }>) => {
         if (!state.doc) return;
-        applyDoc(state, regenerateLayer(current(state).doc!, action.payload.sectionId, action.payload.layer), action.payload.sectionId);
+        const target = action.payload.part !== undefined ? docFor(state, action.payload.part) : null;
+        const { doc, sectionId } = target ?? { doc: current(state).doc!, sectionId: action.payload.sectionId };
+        applyDoc(state, regenerateLayer(doc, sectionId, action.payload.layer), sectionId);
       },
-      toggleLock: (state, action: PayloadAction<{ sectionId: string, layer: Layer }>) => {
+      toggleLock: (state, action: PayloadAction<{ sectionId: string, layer: Layer, part?: number }>) => {
         if (!state.doc) return;
-        const { sectionId, layer } = action.payload;
-        state.doc = setLock(current(state).doc!, sectionId, layer, !state.doc.sections[sectionId]?.locks[layer]);
+        const target = action.payload.part !== undefined ? docFor(state, action.payload.part) : null;
+        const { doc, sectionId } = target ?? { doc: current(state).doc!, sectionId: action.payload.sectionId };
+        const locked = !doc.sections[sectionId]?.locks[action.payload.layer];
+        applyDoc(state, setLock(doc, sectionId, action.payload.layer, locked), sectionId);
+      },
+      setEditScope: (state, action: PayloadAction<'all' | 'part'>) => {
+        state.editScope = action.payload;
       },
       // Energy of one instance: reshapes its drums and transitions only.
       setPartEnergy: (state, action: PayloadAction<{ index: number, energy: number }>) => {
@@ -263,7 +280,7 @@ const song = createSlice({
     },
   });
 
-export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony } = song.actions;
+export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony, setEditScope } = song.actions;
 
 // Thunk: generate a fresh form-first song and load it into the store.
 // Dispatched on mount and by the song tabs. Pass a seed (or full options)

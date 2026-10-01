@@ -770,3 +770,40 @@ input[type="range"].bpm::-moz-range-thumb {
     outline: none;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
+
+// Part title with the edit-scope toggle beside it.
+.partTitleRow {
+    display: flex;
+    align-items: center;
+    column-gap: 14px;
+
+    h3 {
+      margin: 12px 0;
+    }
+}
+
+.scopeToggle {
+    display: inline-flex;
+    border: 1px solid #4281b2;
+    border-radius: 5px;
+    overflow: hidden;
+
+    button {
+      border: none;
+      padding: 4px 10px;
+      background: #fff;
+      color: #4281b2;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+
+      & + button {
+        border-left: 1px solid #4281b2;
+      }
+    }
+
+    .scopeOn {
+      background: #4281b2;
+      color: #fff;
+    }
+}

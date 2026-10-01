@@ -13,7 +13,7 @@ import { useSelector, useDispatch } from "react-redux"
 import { playVerse } from '../Playback/playSong';
 import { getAudioContext } from '../Playback/audioContext';
 import { useLampStep } from '../Playback/useLampStep';
-import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop } from '../reducers';
+import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setEditScope } from '../reducers';
 import { beatsInPart, clampRegion, containsPoint, describePoint, partWindow, stepBeat, sum, trackWindow } from '../Playback/loop';
 import type { AppDispatch } from '../store'
 import styles from "../Styles/App.module.scss"
@@ -580,7 +580,33 @@ function App() {
                       arrangement as the staff's Staff/Tab toggle. */}
                   <div style={{ width: renderWidth ? `max(${renderWidth}px, 100%)` : '100%' }}>
                     <div className={styles.stickyHeader}>
-                      <h3>{songProps.type} ({songProps.repeat})</h3>
+                      <div className={styles.partTitleRow}>
+                        <h3>{songProps.type} ({songProps.repeat})</h3>
+                        {song.doc && songProps.sectionId && (() => {
+                          const sharing = song.doc.form.filter(f => f.sectionId === songProps.sectionId).length;
+                          const partOnly = song.editScope === 'part';
+                          return (
+                            <div className={styles.scopeToggle} role="group" aria-label="Which parts edits change">
+                              <button
+                                className={!partOnly ? styles.scopeOn : ''}
+                                aria-pressed={!partOnly}
+                                onClick={() => dispatch(setEditScope('all'))}
+                                title={`Edits change this ${songProps.type.toLowerCase()} everywhere it plays`}
+                              >
+                                All linked{sharing > 1 ? ` (${sharing})` : ''}
+                              </button>
+                              <button
+                                className={partOnly ? styles.scopeOn : ''}
+                                aria-pressed={partOnly}
+                                onClick={() => dispatch(setEditScope('part'))}
+                                title="Edits change only the open part, which gets its own copy of the section"
+                              >
+                                This part only
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </div>
                       <SectionPanel part={index} />
                     </div>
                   </div>

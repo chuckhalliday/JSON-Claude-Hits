@@ -164,6 +164,25 @@ export function regenerateLayer(doc: SongDoc, id: string, layer: Layer): SongDoc
   return { ...doc, sections: { ...doc.sections, [id]: s }, form };
 }
 
+// Give one part its own copy of its section, so edits and re-rolls made to
+// it leave the section's other instances alone ("this part only"). A part
+// that is already the only instance of its section is returned as is.
+export function detachInstance(doc: SongDoc, index: number): { doc: SongDoc, sectionId: string } {
+  const inst = doc.form[index];
+  const section = inst && doc.sections[inst.sectionId];
+  if (!section) return { doc, sectionId: inst?.sectionId ?? '' };
+  if (doc.form.filter(f => f.sectionId === section.id).length <= 1) return { doc, sectionId: section.id };
+  const base = section.id.replace(/~\d+$/, '');
+  let n = 2;
+  while (doc.sections[`${base}~${n}`]) n++;
+  const id = `${base}~${n}`;
+  const copy: SectionDef = { ...cloneSection(section), id };
+  return {
+    doc: { ...doc, sections: { ...doc.sections, [id]: copy }, form: doc.form.map((f, i) => (i === index ? { ...f, sectionId: id } : f)) },
+    sectionId: id,
+  };
+}
+
 export function setLock(doc: SongDoc, id: string, layer: Layer, locked: boolean): SongDoc {
   const s = doc.sections[id];
   if (!s) return doc;

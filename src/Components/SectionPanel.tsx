@@ -100,7 +100,7 @@ export default function SectionPanel({ part }: SectionPanelProps) {
             <span key={layer} className={styles.layerControl} title={LAYER_INFO[layer].hint}>
               <button
                 className={locked ? `${styles.lockButton} ${styles.locked}` : styles.lockButton}
-                onClick={() => dispatch(toggleLock({ sectionId: section.id, layer }))}
+                onClick={() => dispatch(toggleLock({ sectionId: section.id, layer, part }))}
                 aria-pressed={locked}
                 title={locked ? "Locked: re-rolls won't change this layer. Click to unlock." : "Click to lock this layer."}
               >
@@ -109,7 +109,7 @@ export default function SectionPanel({ part }: SectionPanelProps) {
               <button
                 className={styles.rerollButton}
                 disabled={locked}
-                onClick={() => dispatch(rerollLayer({ sectionId: section.id, layer }))}
+                onClick={() => dispatch(rerollLayer({ sectionId: section.id, layer, part }))}
               >
                 Re-roll {LAYER_INFO[layer].label}
               </button>
@@ -121,7 +121,9 @@ export default function SectionPanel({ part }: SectionPanelProps) {
         })}
       </div>
       <p className={styles.sectionNote}>
-        Click a chord, its numeral or its bass note to change it. Edits here apply to every {section.label.toLowerCase()} and lock that layer. Drum edits inside a fill or crash stay on this instance.
+        Click a chord, its numeral or its bass note to change it. {song.editScope === 'part'
+          ? <>Edits and re-rolls change only this part{plays > 1 ? ` (it gets its own copy of the ${section.label.toLowerCase()} on the first one)` : ''}, and lock that layer.</>
+          : <>Edits here apply to every {section.label.toLowerCase()}{plays > 1 ? ` (${plays} parts)` : ''} and lock that layer.</>} Drum edits inside a fill or crash stay on this instance.
       </p>
     </div>
   );

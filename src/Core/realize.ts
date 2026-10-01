@@ -38,14 +38,17 @@ function shiftVoicing(notes: number[], t: number): number[] {
 }
 
 // Whether an instance opens with a crash / closes with a fill, from its
-// neighbours in the form.
-export function transitions(form: SectionInstance[], i: number) {
+// neighbours in the form. Compared by section label, so a part detached
+// onto its own copy of a section still counts as the same kind of section.
+export function transitions(doc: SongDoc, i: number) {
+  const form = doc.form;
+  const label = (inst?: SectionInstance) => (inst ? doc.sections[inst.sectionId]?.label : undefined);
   const inst = form[i];
   const prev = form[i - 1];
   const next = form[i + 1];
   return {
-    crashIn: i > 0 && inst.energy >= 0.4 && (prev.sectionId !== inst.sectionId || inst.energy > prev.energy),
-    fillOut: next !== undefined && (next.sectionId !== inst.sectionId || next.energy > inst.energy + 0.05),
+    crashIn: i > 0 && inst.energy >= 0.4 && (label(prev) !== label(inst) || inst.energy > prev.energy),
+    fillOut: next !== undefined && (label(next) !== label(inst) || next.energy > inst.energy + 0.05),
   };
 }
 
@@ -53,8 +56,10 @@ export function transitions(form: SectionInstance[], i: number) {
 export function instancePattern(doc: SongDoc, i: number) {
   const inst = doc.form[i];
   const s = doc.sections[inst.sectionId];
-  const rng = streamFor(doc.seed, 'instance', i, s.id, s.rolls.drums, s.rolls.rhythm);
-  const grid = instanceDrums(s.drums, { steps: s.drumSteps, sectionEnergy: s.energy, energy: inst.energy, ...transitions(doc.form, i) }, rng);
+  // Seeded by the original section's id, so a part detached onto its own
+  // copy ("this part only") keeps the same fills and crashes.
+  const rng = streamFor(doc.seed, 'instance', i, s.id.replace(/~\d+$/, ''), s.rolls.drums, s.rolls.rhythm);
+  const grid = instanceDrums(s.drums, { steps: s.drumSteps, sectionEnergy: s.energy, energy: inst.energy, ...transitions(doc, i) }, rng);
   for (const o of inst.drumOverrides) {
     if (grid[o.voice]?.[o.step]) grid[o.voice][o.step] = { checked: o.checked, accent: grid[o.voice][o.step].accent };
   }
