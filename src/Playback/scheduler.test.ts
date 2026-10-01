@@ -59,6 +59,22 @@ describe('runPreScheduledSequence timing', () => {
     expect(starts).toEqual([11, 11.25, 11.5, 11.75, 12, 12.25]);
   });
 
+  it('creates notes only shortly before they play', async () => {
+    const created: Array<[number, number]> = []; // [note time, clock when created]
+    const timing: SequenceTiming = { startAt: 10.5 };
+    const promise = runPreScheduledSequence(0, 40, () => 0.25, (_i, t) => created.push([t, fakeContext.currentTime]), undefined, timing);
+    await Promise.resolve();
+    await Promise.resolve();
+    // Only the first half-second of a 10 s sequence exists right away.
+    expect(created.length).toBeLessThanOrEqual(3);
+    await run(promise);
+    expect(created.length).toBe(40);
+    created.forEach(([t, clock]) => {
+      expect(t - clock).toBeLessThanOrEqual(0.5 + 1e-9);
+      expect(t).toBeGreaterThanOrEqual(clock);
+    });
+  });
+
   it('resolveStart keeps a future start and replaces a stale one', () => {
     expect(resolveStart({ currentTime: 1 } as BaseAudioContext, 3)).toBe(3);
     expect(resolveStart({ currentTime: 1 } as BaseAudioContext, 0.5)).toBeCloseTo(1.1);
