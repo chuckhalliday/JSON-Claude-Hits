@@ -590,3 +590,47 @@ input[type="range"].bpm::-moz-range-thumb {
     font-size: 11px;
     color: #888;
 }
+
+// Loop: blocks inside the loop region, transport controls, readout.
+.inLoop {
+    box-shadow: inset 0 -3px 0 #ff8c00, 0 0 0 2px #ff8c00;
+}
+
+.inLoopOff {
+    box-shadow: 0 0 0 2px #bbb;
+}
+
+.loopControls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    row-gap: 4px;
+    margin: 0 16px;
+}
+
+.loopButtons {
+    display: flex;
+    column-gap: 4px;
+
+    .button {
+      width: auto;
+      padding: 0 10px;
+    }
+
+    .button:disabled {
+      background-color: #e5e5e5;
+      color: #999;
+      cursor: not-allowed;
+    }
+}
+
+.loopReadout {
+    font-size: 11px;
+    color: #555;
+    max-width: 260px;
+    text-align: center;
+}
+
+.loopingSection {
+    background-color: #ff8c00;
+}

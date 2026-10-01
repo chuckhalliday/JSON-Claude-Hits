@@ -21,6 +21,13 @@ export async function countIn(bpm: number, midi: boolean, beat: number, initDrum
   }
 }
 
+// Where each track stops, exclusive (a loop's end bar); omitted = part end.
+export interface TrackEnds {
+  drum?: number;
+  bass?: number;
+  chord?: number;
+}
+
 export interface VersePlaybackResult {
   drumBeat: number;
   bassBeat: number;
@@ -31,7 +38,7 @@ export interface VersePlaybackResult {
 
 export async function playVerse(bpm: number, midi: boolean, drumBeat: number, bassBeat: number, chordBeat: number, verseDrumGroove: number[], verseDrums: DrumHit[][],
   verseBassGroove: number[], verseBass: NoteLocation[], verseChordGroove: number[], verseChords: string[], verseChordTones: ChordTones, onStep: (lampIndex: number) => void, shouldStop?: () => boolean,
-  includeDrums = true, includeBass = true, includeChords = true, acoustic = true, key?: string, startAt?: number): Promise<VersePlaybackResult> {
+  includeDrums = true, includeBass = true, includeChords = true, acoustic = true, key?: string, startAt?: number, ends: TrackEnds = {}): Promise<VersePlaybackResult> {
   // One start time for every track of the part (the previous part's end
   // when chaining), and each track resolves PART_LOOKAHEAD early.
   const audioContext = await ensureAudioRunning();
@@ -46,12 +53,12 @@ export async function playVerse(bpm: number, midi: boolean, drumBeat: number, ba
   // too); only the first carries the lamp-stepping callback.
   const results = await Promise.all([
     ...verseDrums.map((pattern, voice) =>
-      playBeat(midi, drumBeat, pattern, verseDrumGroove, bpm, verseDrums, voice === 0 ? onStep : undefined, shouldStop, !includeDrums, acoustic, key, timing())),
+      playBeat(midi, drumBeat, pattern, verseDrumGroove, bpm, verseDrums, voice === 0 ? onStep : undefined, shouldStop, !includeDrums, acoustic, key, timing(), ends.drum)),
     // Bass and chord onsets always fall on drum steps, so the drums' step
     // callback already lights every lamp; passing it to these too only
     // tripled the per-step dispatches and re-renders.
-    playBass(midi, bassBeat, verseBass, verseBassGroove, bpm, shouldStop, undefined, verseDrumGroove, !includeBass, acoustic, timing()),
-    playChords(midi, chordBeat, verseChords, verseChordTones, verseChordGroove, bpm, shouldStop, undefined, verseDrumGroove, !includeChords, acoustic, timing())
+    playBass(midi, bassBeat, verseBass, verseBassGroove, bpm, shouldStop, undefined, verseDrumGroove, !includeBass, acoustic, timing(), ends.bass),
+    playChords(midi, chordBeat, verseChords, verseChordTones, verseChordGroove, bpm, shouldStop, undefined, verseDrumGroove, !includeChords, acoustic, timing(), ends.chord)
   ])
   const endTime = Math.max(start, ...timings.map(t => t.endTime ?? start));
   return { drumBeat: results[0], bassBeat: results[verseDrums.length], chordBeat: results[verseDrums.length + 1], endTime }

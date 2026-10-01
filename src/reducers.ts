@@ -6,6 +6,7 @@ import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance 
 import { realizeSong, realizeSection, realizeInstance, assignStepIds } from "./Core/realize";
 import { editBass, editDrum, editChordTone } from "./Core/edits";
 import { keyName } from "./Core/theory";
+import { LoopPoint, LoopRegion, comparePoints, regionBetween } from "./Playback/loop";
 
 export interface SongState {
     isPlaying: boolean,
@@ -22,7 +23,10 @@ export interface SongState {
     // The sculpted song document (src/Core) when the song came from the
     // form-first engine; songStructure is then a view realized from it, and
     // edits/re-rolls go through the document. Null for classic songs.
-    doc?: SongDoc | null
+    doc?: SongDoc | null,
+    // Loop region (bar-snapped locators) and whether playback cycles it.
+    loop?: LoopRegion | null,
+    loopEnabled?: boolean
 }
 
 // The song tree starts empty and deterministic. The first song is produced by
@@ -38,7 +42,9 @@ const initialState: SongState = {
     songStructure: [],
     seed: null,
     params: null,
-    doc: null
+    doc: null,
+    loop: null,
+    loopEnabled: false
 };
 
 // Everything setSong needs to load a sculpted document.
@@ -87,6 +93,9 @@ const song = createSlice({
         state.params = action.payload.params ?? null;
         state.doc = action.payload.doc ?? null;
         state.selectedBeat = [0, 0, 0, 0];
+        // Bar positions belong to the old song.
+        state.loop = null;
+        state.loopEnabled = false;
       },
       setBassState: (state, action: PayloadAction<{ index: number, bassNoteLocations: NoteLocation[] }>) => {
         const sculpted = docFor(state, action.payload.index);
@@ -139,6 +148,9 @@ const song = createSlice({
         if (from === to || from < 0 || to < 0 || from >= state.songStructure.length || to >= state.songStructure.length) {
           return;
         }
+        // The loop is defined by part positions, which a reorder scrambles.
+        state.loop = null;
+        state.loopEnabled = false;
         if (state.doc && state.doc.form.length === state.songStructure.length) {
           // Transitions (crashes, fills) depend on neighbours, so re-render all.
           applyDoc(state, moveInstance(current(state).doc!, from, to));
@@ -146,6 +158,32 @@ const song = createSlice({
         }
         const [moved] = state.songStructure.splice(from, 1);
         state.songStructure.splice(to, 0, moved);
+      },
+      // Set the loop to a region (or clear it) and turn cycling on/off.
+      setLoop: (state, action: PayloadAction<LoopRegion | null>) => {
+        state.loop = action.payload;
+        state.loopEnabled = action.payload !== null;
+      },
+      // Move one locator; the other stays. With no loop yet, both land here.
+      setLoopPoint: (state, action: PayloadAction<{ which: 'start' | 'end', point: LoopPoint }>) => {
+        const { which, point } = action.payload;
+        const loop = state.loop;
+        state.loop = !loop ? { start: point, end: point }
+          : which === 'start' ? regionBetween(point, loop.end) : regionBetween(loop.start, point);
+        state.loopEnabled = true;
+      },
+      // Grow the loop to include a bar (shift-click).
+      extendLoop: (state, action: PayloadAction<LoopPoint>) => {
+        const point = action.payload;
+        const loop = state.loop;
+        state.loop = !loop ? { start: point, end: point } : {
+          start: comparePoints(point, loop.start) < 0 ? point : loop.start,
+          end: comparePoints(point, loop.end) > 0 ? point : loop.end,
+        };
+        state.loopEnabled = true;
+      },
+      toggleLoop: (state) => {
+        if (state.loop) state.loopEnabled = !state.loopEnabled;
       },
       // Re-roll one layer of one section (unlocked dependents follow).
       rerollLayer: (state, action: PayloadAction<{ sectionId: string, layer: Layer }>) => {
@@ -177,7 +215,7 @@ const song = createSlice({
     },
   });
 
-export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy } = song.actions;
+export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPoint, extendLoop, toggleLoop } = song.actions;
 
 // Thunk: generate a fresh form-first song and load it into the store.
 // Dispatched on mount and by the song tabs. Pass a seed (or full options)

@@ -165,7 +165,7 @@ function playSynthBassOsc(audioContext: AudioContext, startTime: number, bass: n
     return oscillators;
   }
 
-  function playBass(midi: boolean, beat: number, pattern: NoteLocation[], groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true, timing?: SequenceTiming) {
+  function playBass(midi: boolean, beat: number, pattern: NoteLocation[], groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true, timing?: SequenceTiming, end?: number) {
     const beatDuration = 60 / bpm; // duration of one beat in seconds
     const audioContext = getAudioContext();
 
@@ -199,7 +199,7 @@ function playSynthBassOsc(audioContext: AudioContext, startTime: number, bass: n
       }
     };
 
-    return runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop, timing);
+    return runPreScheduledSequence(beat, end ?? pattern.length, getDuration, onSchedule, shouldStop, timing);
   }
 
   export default playBass;

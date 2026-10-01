@@ -110,7 +110,7 @@ function scheduleAcousticChordNote(audioContext: AudioContext, gainNode: GainNod
   });
 }
 
-export default async function playChords(midi: boolean, beat: number, pattern: string[], chords: ChordTones, groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true, timing?: SequenceTiming) {
+export default async function playChords(midi: boolean, beat: number, pattern: string[], chords: ChordTones, groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true, timing?: SequenceTiming, end?: number) {
     const beatDuration = 60 / bpm; // duration of one beat in seconds
     const audioContext = getAudioContext();
 
@@ -151,7 +151,7 @@ export default async function playChords(midi: boolean, beat: number, pattern: s
         }
       };
 
-      const finalIndex = await runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop, timing);
+      const finalIndex = await runPreScheduledSequence(beat, end ?? pattern.length, getDuration, onSchedule, shouldStop, timing);
       // With a lookahead the sequence resolves before its last chords finish,
       // so leave the bus connected until they (and their release) have rung out.
       const ringOut = Math.max(0, (timing?.endTime ?? 0) - audioContext.currentTime) + 1;
@@ -173,6 +173,6 @@ export default async function playChords(midi: boolean, beat: number, pattern: s
         }
       };
 
-      return runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop, timing);
+      return runPreScheduledSequence(beat, end ?? pattern.length, getDuration, onSchedule, shouldStop, timing);
     }
   }

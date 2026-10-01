@@ -163,3 +163,43 @@ $rowGap: 8px;
     background-color: #4281b2;
   }
 }
+
+// Bar ruler above the lamps: bar numbers set loop points, and the loop
+// region is tinted.
+.barCell {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+
+  &[in-loop=on] {
+    background-color: rgba(255, 140, 0, 0.35);
+    box-shadow: 8px 0 0 rgba(255, 140, 0, 0.35);
+  }
+
+  &[in-loop=off] {
+    background-color: rgba(0, 0, 0, 0.08);
+    box-shadow: 8px 0 0 rgba(0, 0, 0, 0.08);
+  }
+}
+
+.barTag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 18px;
+  min-width: 22px;
+  padding: 0 4px;
+  border: 1px solid #999;
+  border-radius: 3px;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    background: #ffe0b3;
+  }
+}

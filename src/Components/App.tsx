@@ -13,7 +13,8 @@ import { useSelector, useDispatch } from "react-redux"
 import { playVerse } from '../Playback/playSong';
 import { getAudioContext } from '../Playback/audioContext';
 import { useLampStep } from '../Playback/useLampStep';
-import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong } from '../reducers';
+import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPoint, toggleLoop } from '../reducers';
+import { LoopPoint, barAtStep, barsInPart, clampRegion, containsPoint, describePoint, partBars, partWindow, sum, trackWindow } from '../Playback/loop';
 import type { AppDispatch } from '../store'
 import styles from "../Styles/App.module.scss"
 import { supabase } from '../supabaseClient'
@@ -178,6 +179,17 @@ function App() {
   // fire after the next part is already on screen; they must not light lamps
   // in the new part's grid.
   const activeVerseRef = React.useRef(-1);
+  // Where the next segment enters ([part, drum, bass, chord] indices) when
+  // playback moves on by itself - the next part, or back to the loop start.
+  // Passed by ref (not read back from the store) because the previous
+  // segment's last step timers may still be updating the store position.
+  const nextEntryRef = React.useRef<number[] | undefined>(undefined);
+  // The newest song state, for decisions made after an await.
+  const songRef = React.useRef(song);
+  songRef.current = song;
+  // Bumped to re-run the playback effect when a loop wraps within one part
+  // (the part index doesn't change, so it alone wouldn't trigger it).
+  const [playTick, setPlayTick] = useState(0);
 
   const partGrooves = song.songStructure[verse] ?? { drumGroove: [], bassGroove: [], chordsGroove: [] };
   const handleStep = useLampStep(lampsRef, verse, partGrooves.drumGroove, partGrooves.bassGroove, partGrooves.chordsGroove);
@@ -222,19 +234,35 @@ function App() {
       //Drop locators
       //output.sendMessage([144, 17, 1])
       //output.sendMessage([176, sum, 1])
+      // Play the part from the playhead to the end of its loop window (the
+      // whole part when no loop bounds it). Every track is cut at the drum
+      // playhead's beat, so they stay aligned even when resuming mid-note.
+      const part = song.songStructure[verse];
+      const loop = song.loopEnabled ? clampRegion(song.loop, song.songStructure) : null;
+      const partBeats = sum(part.drumGroove);
+      const fromBeat = sum(part.drumGroove.slice(0, drumBeat));
+      // Stop at the loop's end bar if this pass reaches it.
+      const loopEndBeat = (region: typeof loop) => region && region.end.part === verse ? partWindow(region, verse, part).toBeat : null;
+      const cycleAt = loopEndBeat(loop);
+      const toBeat = cycleAt !== null && fromBeat < cycleAt - 0.01 ? cycleAt : partBeats;
+      const windowed = {
+        drum: trackWindow(part.drumGroove, fromBeat, toBeat),
+        bass: trackWindow(part.bassGroove, fromBeat, toBeat),
+        chord: trackWindow(part.chordsGroove, fromBeat, toBeat),
+      };
       const result = await playVerse(
         song.bpm,
         song.midi,
-        drumBeat,
-        bassBeat,
-        chordBeat,
-        song.songStructure[verse].drumGroove,
-        song.songStructure[verse].drums,
-        song.songStructure[verse].bassGroove,
-        song.songStructure[verse].bassNoteLocations,
-        song.songStructure[verse].chordsGroove,
-        song.songStructure[verse].chords,
-        song.songStructure[verse].chordTones,
+        windowed.drum.start,
+        windowed.bass.start,
+        windowed.chord.start,
+        windowed.drum.groove,
+        part.drums,
+        windowed.bass.groove,
+        part.bassNoteLocations,
+        windowed.chord.groove,
+        part.chords,
+        part.chordTones,
         step,
         () => stopRef.current,
         includeDrums,
@@ -242,7 +270,8 @@ function App() {
         includeChords,
         acoustic,
         song.key,
-        startAt
+        startAt,
+        { drum: windowed.drum.end, bass: windowed.bass.end, chord: windowed.chord.end }
       );
 
       if (stopRef.current) {
@@ -266,15 +295,35 @@ function App() {
         return;
       }
 
-      const nextVerse = verse + 1
-      if (nextVerse < song.songStructure.length) {
-        // Resolved just before this part ends: the next part starts exactly
-        // where this one finishes.
+      // What comes next is decided from the loop as it is now (it may have
+      // been moved or switched off during this pass): back to the loop start
+      // if this pass ended on its end bar, on through the rest of this part
+      // if the loop was switched off, or on to the next part.
+      const latest = songRef.current;
+      const loopNow = latest.loopEnabled ? clampRegion(latest.loop, latest.songStructure) : null;
+      const wrapAt = loopEndBeat(loopNow);
+      let entry: number[] | null = null;
+      if (loopNow && wrapAt !== null && Math.abs(toBeat - wrapAt) < 0.01) {
+        const start = partWindow(loopNow, loopNow.start.part, latest.songStructure[loopNow.start.part]);
+        entry = [loopNow.start.part, start.drum.start, start.bass.start, start.chord.start];
+      } else if (toBeat < partBeats - 0.01) {
+        const rest = (groove: number[]) => trackWindow(groove, toBeat, partBeats).start;
+        entry = [verse, rest(part.drumGroove), rest(part.bassGroove), rest(part.chordsGroove)];
+      } else if (verse + 1 < latest.songStructure.length) {
+        entry = [verse + 1, 0, 0, 0];
+      }
+      const nextVerse = entry ? entry[0] : -1;
+      if (entry) {
+        // Resolved just before this segment ends: the next one starts
+        // exactly where it finishes.
         nextStartRef.current = result.endTime;
-        activeVerseRef.current = nextVerse;
-        dispatch(setCurrentBeat([nextVerse, 0, 0, 0]))
-        setCurrentPart(nextVerse);
-        handlePartOpen(`${nextVerse}`);
+        nextEntryRef.current = entry;
+        dispatch(setCurrentBeat(entry))
+        if (nextVerse !== verse) {
+          activeVerseRef.current = nextVerse;
+          showPart(nextVerse);
+        }
+        setPlayTick(t => t + 1);
       } else {
       dispatch(setIsPlaying({ isPlaying: false }))
       console.log("End")
@@ -301,6 +350,12 @@ function App() {
     } else {
       setCurrentPart(-1);
     }
+  };
+
+  // Open a part (without the toggle-closed behaviour of handlePartOpen).
+  const showPart = (index: number) => {
+    setOpenedParts({ [`${index}`]: true });
+    setCurrentPart(index);
   };
 
   const handlePartDragStart = (index: number) => {
@@ -342,9 +397,19 @@ function App() {
 
   useEffect(() => {
      if (isPlaying) {
-      playSong(song, verse, drumBeat, bassBeat, chordBeat);
+      const entry = nextEntryRef.current;
+      nextEntryRef.current = undefined;
+      if (entry) {
+        playSong(song, entry[0], entry[1], entry[2], entry[3]);
+      } else {
+        playSong(song, verse, drumBeat, bassBeat, chordBeat);
+      }
     }
-  }, [isPlaying, verse]);
+    // Not keyed on the part index: moving on to the next part (or back to a
+    // loop start) bumps playTick, and the store update that moves the part
+    // can render separately from it - keying on both started a second,
+    // overlapping playback each time the song crossed into another part.
+  }, [isPlaying, playTick]);
 
 
  // Switches to song tab `index`, saving the outgoing tab's full state (so its
@@ -385,12 +450,45 @@ function App() {
     } else {
       stopRef.current = false;
       nextStartRef.current = undefined;
-      if (!openedParts[0] && !openedParts[song.selectedBeat[0]]) {
+      nextEntryRef.current = undefined;
+      // With the loop on and the playhead outside it, start at the loop.
+      // Judged from the stored playhead - where playback actually resumes -
+      // not from whichever part happens to be open.
+      const loop = song.loopEnabled ? clampRegion(song.loop, song.songStructure) : null;
+      const [resumePart, resumeStep] = song.selectedBeat;
+      const resumeGroove = song.songStructure[resumePart]?.drumGroove;
+      const here = resumeGroove ? { part: resumePart, bar: barAtStep(resumeGroove, resumeStep) } : null;
+      if (loop && (!here || !containsPoint(loop, here))) {
+        const bounds = partWindow(loop, loop.start.part, song.songStructure[loop.start.part]);
+        const entry = [loop.start.part, bounds.drum.start, bounds.bass.start, bounds.chord.start];
+        nextEntryRef.current = entry;
+        dispatch(setCurrentBeat(entry));
+        showPart(loop.start.part);
+      } else if (!openedParts[0] && !openedParts[song.selectedBeat[0]]) {
         handlePartOpen(`${song.selectedBeat[0]}`)
       }
       dispatch(setIsPlaying({isPlaying: true}));
     }
   };
+
+  // The bar under the playhead: the lit lamp of the open part, falling back
+  // to the stored position.
+  const playheadPoint = (): LoopPoint | null => {
+    const partIndex = currentPart >= 0 ? currentPart : song.selectedBeat[0];
+    const part = song.songStructure[partIndex];
+    if (!part) return null;
+    const lit = partIndex === currentPart ? lampsRef.current.findIndex(l => l?.checked) : -1;
+    const step = lit >= 0 && lit < part.drumGroove.length ? lit : partIndex === song.selectedBeat[0] ? song.selectedBeat[1] : 0;
+    return { part: partIndex, bar: barAtStep(part.drumGroove, step) };
+  };
+
+  // Loop In / Out: drop a locator on the playhead's bar.
+  const setLoopAtPlayhead = (which: 'start' | 'end') => {
+    const point = playheadPoint();
+    if (point) dispatch(setLoopPoint({ which, point }));
+  };
+  const loopRegion = clampRegion(song.loop, song.songStructure);
+  const loopOn = !!song.loopEnabled && loopRegion !== null;
 
   const handleAcoustic = () => {
     dispatch(setAcoustic({ acoustic: !acoustic }));
@@ -454,6 +552,7 @@ function App() {
                   isOpen ? styles.openButton : '',
                   draggedPartIndex === index ? styles.draggingPart : '',
                   dragOverPartIndex === index ? styles.dragOverPart : '',
+                  loopRegion && barsInPart(loopRegion, index, partBars(songProps)) ? (loopOn ? styles.inLoop : styles.inLoopOff) : '',
                 ].filter(Boolean).join(' ')}
                 style={{ width: `${Math.max(30, bars * 5)}px` }}
                 title={blockTitle}
@@ -553,6 +652,25 @@ function App() {
             >
               {isPlaying ? "Pause" : "Play Song"}
             </button>
+          </div>
+          <div className={styles.loopControls}>
+            <div className={styles.loopButtons}>
+              <button
+                onClick={() => dispatch(toggleLoop())}
+                disabled={!loopRegion}
+                className={loopOn ? `${styles.button} ${styles.openButton}` : styles.button}
+                title={loopRegion ? 'Cycle playback between the loop points' : 'Set loop points first: Set Start / Set End at the playhead, or click a bar number above the drum grid'}
+              >
+                ⟳ Loop
+              </button>
+              <button onClick={() => setLoopAtPlayhead('start')} className={styles.button} title="Set the loop start to the playhead's bar">Set Start</button>
+              <button onClick={() => setLoopAtPlayhead('end')} className={styles.button} title="Set the loop end to the playhead's bar">Set End</button>
+            </div>
+            <span className={styles.loopReadout}>
+              {loopRegion
+                ? `${describePoint(loopRegion.start, song.songStructure)} → ${describePoint(loopRegion.end, song.songStructure)}`
+                : 'No loop set'}
+            </span>
           </div>
           <div className={styles.midiControls}>
             <button onClick={handleMidi} className={styles.button}>

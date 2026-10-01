@@ -1,6 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { playDrums } from "../Playback/playSong";
-import { setDrumState, SongState, setCurrentBeat } from "../reducers";
+import { setDrumState, SongState, setCurrentBeat, setLoop, extendLoop } from "../reducers";
+import { barsInPart, clampRegion, partBars } from "../Playback/loop";
 import { useDispatch, useSelector } from "react-redux";
 import { PlayHandle } from "./Piano";
 import styles from "../Styles/DrumMachine.module.scss";
@@ -95,6 +96,32 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
   //Array of beats
   const stepIds = [...steps.keys()]
 
+  // Bar of each step, and which steps open a bar (they carry the bar number
+  // in the ruler above the lamps).
+  const stepBars: number[] = [];
+  const barStart: boolean[] = [];
+  {
+    let beats = 0;
+    drumGroove.forEach((d, i) => {
+      const bar = Math.floor((beats + 0.02) / 4);
+      barStart.push(i === 0 || bar !== stepBars[i - 1]);
+      stepBars.push(bar);
+      beats += d;
+    });
+  }
+  const loopRegion = clampRegion(song.loop, song.songStructure);
+  const loopBars = loopRegion ? barsInPart(loopRegion, part, partBars(song.songStructure[part])) : null;
+  const inLoop = (bar: number) => !!loopBars && bar >= loopBars[0] && bar <= loopBars[1];
+
+  // Click a bar number to loop that bar; shift-click to stretch the loop to
+  // include it (across parts too).
+  const handleBarClick = (event: React.MouseEvent, bar: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const point = { part, bar };
+    dispatch(event.shiftKey ? extendLoop(point) : setLoop({ start: point, end: point }));
+  };
+
 
   const handleStartClick = async () => {
     if (isPlaying) {
@@ -167,6 +194,33 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
       </div>
   
       <div className={styles.grid}>
+        {/* Bar ruler: loop points */}
+        <div className={styles.row}>
+          {stepIds.map((stepId) => {
+            const spacing = addSpacingToRows(stepId + 1)
+            const bar = stepBars[stepId]
+            return (
+              <span
+                key={stepId}
+                className={styles.barCell}
+                measure-end={spacing.measure}
+                beat-end={spacing.beat}
+                in-loop={inLoop(bar) ? (song.loopEnabled ? 'on' : 'off') : undefined}
+              >
+                {barStart[stepId] && (
+                  <button
+                    type="button"
+                    className={styles.barTag}
+                    onClick={(e) => handleBarClick(e, bar)}
+                    title="Loop this bar (shift-click to extend the loop to it)"
+                  >
+                    {bar + 1}
+                  </button>
+                )}
+              </span>
+            )
+          })}
+        </div>
         {/* Renders ticks */}
         <div className={styles.row}>
           {stepIds.map((stepId) => {

@@ -1,5 +1,6 @@
 import { useDispatch, useSelector } from "react-redux";
-import { SongState, rerollLayer, toggleLock, setPartEnergy } from "../reducers";
+import { SongState, rerollLayer, toggleLock, setPartEnergy, setLoop } from "../reducers";
+import { clampRegion, partBars } from "../Playback/loop";
 import { Layer, LAYERS, LAYER_DEPENDENTS } from "../Core/doc";
 import { spellPc, spelledName } from "../Core/theory";
 import { transposedKey } from "../Core/realize";
@@ -30,12 +31,22 @@ export default function SectionPanel({ part }: SectionPanelProps) {
   const instance = doc.form[part];
   const plays = doc.form.filter(f => f.sectionId === section.id).length;
   const key = transposedKey(doc.key, instance?.transpose ?? 0);
+  const lastBar = partBars(p) - 1;
+  const loop = clampRegion(song.loop, song.songStructure);
+  const loopingThis = !!song.loopEnabled && !!loop && loop.start.part === part && loop.start.bar === 0 && loop.end.part === part && loop.end.bar === lastBar;
 
   return (
     <div className={styles.sectionPanel}>
       <div className={styles.sectionHeader}>
         <strong>{section.label}</strong>
         <span>{section.bars} bars · {section.cadence} cadence · plays {plays}×{instance?.transpose ? ` · lifted +${instance.transpose}` : ""}</span>
+        <button
+          className={loopingThis ? `${styles.rerollButton} ${styles.loopingSection}` : styles.rerollButton}
+          onClick={() => dispatch(setLoop(loopingThis ? null : { start: { part, bar: 0 }, end: { part, bar: lastBar } }))}
+          title="Cycle playback over this section - handy while re-rolling its layers"
+        >
+          {loopingThis ? "⟳ Looping" : "⟳ Loop section"}
+        </button>
         <label className={styles.energyControl} title="Energy of this instance only: shapes hats, kick, and the transitions around it.">
           Energy
           <input
