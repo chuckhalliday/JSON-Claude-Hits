@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import playBass from '../Playback/playBass';
 import { setBassState, setCurrentBeat, SongState } from '../reducers';
@@ -119,10 +119,12 @@ interface BassStaffProps {
 }
 
 
+// Loaded once for every staff instead of on every render.
+const CLEF_IMAGE = new Image();
+CLEF_IMAGE.src = "/BassClef.png";
+
 const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ renderWidth, part, lampsRef, onPlayingChange, viewMode, onViewModeChange }, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const CLEF_IMAGE = new Image();
-  CLEF_IMAGE.src = "/BassClef.png";
   const dispatch = useDispatch()
 
   const song = useSelector((state: { song: SongState }) => state.song);
@@ -148,11 +150,28 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
     setPendingNote(null);
   }, [part]);
 
-  const MOUSE = {
+  // One mouse record for the component's lifetime. It used to be a fresh
+  // object every render, and since it sat in the effect dependency lists
+  // below, every render (one per playback step) re-ran them.
+  const MOUSE = useRef({
     x: -10,
     y: -10,
     isDown: false
-  };
+  }).current;
+
+  // Redraw on demand, coalesced to one frame. The staff used to start a new
+  // never-cancelled requestAnimationFrame loop on every render; during
+  // playback that piled up dozens of full-canvas redraw loops per part and
+  // starved the main thread until playback skipped and stalled.
+  const drawRef = useRef<() => void>(() => {});
+  const frameRef = useRef(0);
+  const requestDraw = useCallback(() => {
+    if (frameRef.current) return;
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = 0;
+      drawRef.current();
+    });
+  }, []);
 
 
   function mouseX(array: number[]) {
@@ -507,8 +526,9 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
   function drawScene() {
     const CANVAS = canvasRef.current;
     if (CANVAS) {
-      CANVAS.width = renderWidth; // Set canvas width based on renderWidth prop
-      CANVAS.height = CANVAS_HEIGHT;
+      // Resizing reallocates the canvas, so only do it when the size changes.
+      if (CANVAS.width !== renderWidth) CANVAS.width = renderWidth;
+      if (CANVAS.height !== CANVAS_HEIGHT) CANVAS.height = CANVAS_HEIGHT;
       const ctx = CANVAS.getContext('2d');
       const spacing = SPACING;
       if (ctx) {
@@ -592,6 +612,7 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
         const scrollTop = document.documentElement.scrollTop;
         MOUSE.x = event.clientX - rect.left - scrollLeft;
         MOUSE.y = event.clientY - rect.top - scrollTop;
+        requestDraw();
       }
     }
 
@@ -666,7 +687,9 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
         CANVAS.removeEventListener('mouseup', onMouseUp as any);
       }
     };
-  }, [MOUSE, viewMode]);
+    // Re-bound only when something the handlers read changes - not on every
+    // playback step.
+  }, [MOUSE, viewMode, pendingNote, bassNoteGrid, bassGrid, part, dispatch, requestDraw]);
 
   const [isPlaying, setIsPlaying] = React.useState(false);
   const stopRef = useRef(false);
@@ -692,23 +715,23 @@ const BassStaff = forwardRef<PlayHandle, BassStaffProps>(function BassStaff({ re
     play: handleStartClick
   }));
 
-  useEffect(() => {
-    function main() {
-      const CANVAS = canvasRef.current;
-      if (CANVAS) {
-        animate();
-      }
-    }
+  drawRef.current = drawScene;
 
-    function animate() {
-      const CANVAS = canvasRef.current;
-      if (CANVAS) {
-        drawScene();
-        window.requestAnimationFrame(animate);
+  // Draw when what the staff shows changes, and once the clef image loads.
+  useEffect(() => {
+    requestDraw();
+  }, [requestDraw, renderWidth, bassNoteGrid, bassGroove, chords, chordGrid, bassGrid, measureLines, pendingNote, viewMode]);
+
+  useEffect(() => {
+    if (!CLEF_IMAGE.complete) CLEF_IMAGE.addEventListener('load', requestDraw);
+    return () => {
+      CLEF_IMAGE.removeEventListener('load', requestDraw);
+      if (frameRef.current) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = 0;
       }
-    }
-    main();
-  }, [renderWidth, bassNoteGrid, bassGroove, chords, chordGrid, bassGrid, pendingNote, MOUSE, viewMode]);
+    };
+  }, [requestDraw]);
 
   return (
     // Sticky positioning can only carry the button as far as this container's

@@ -1,7 +1,7 @@
 import { triggerMidi } from "./playFunctions";
 import { indexToLamp } from "../SongStructure/beatMapping";
 import { getAudioContext } from "./audioContext";
-import { runPreScheduledSequence, scheduleTimer, Register } from "./scheduler";
+import { runPreScheduledSequence, scheduleTimer, Register, SequenceTiming } from "./scheduler";
 import { NoteLocation } from "../types";
 
 const distortionAmount = 30; // Adjust distortion amount as needed
@@ -165,7 +165,7 @@ function playSynthBassOsc(audioContext: AudioContext, startTime: number, bass: n
     return oscillators;
   }
 
-  function playBass(midi: boolean, beat: number, pattern: NoteLocation[], groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true) {
+  function playBass(midi: boolean, beat: number, pattern: NoteLocation[], groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true, timing?: SequenceTiming) {
     const beatDuration = 60 / bpm; // duration of one beat in seconds
     const audioContext = getAudioContext();
 
@@ -199,7 +199,7 @@ function playSynthBassOsc(audioContext: AudioContext, startTime: number, bass: n
       }
     };
 
-    return runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop);
+    return runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop, timing);
   }
 
   export default playBass;

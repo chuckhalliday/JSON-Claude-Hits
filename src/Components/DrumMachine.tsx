@@ -40,16 +40,14 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
 
   const handleStep = useLampStep(lampsRef, part, drumGroove, bassGroove, chordsGroove);
 
-    const stepsRef = React.useRef<HTMLInputElement[][]>(
-      Array.from({ length: drums.length }, () =>
-        Array.from({ length: numOfSteps }, () => document.createElement("input"))
-      )
-    );
+    // Filled by the checkbox ref callbacks below. (Its initial value used to
+    // be a grid of detached <input>s, built on every render and thrown away.)
+    const stepsRef = React.useRef<HTMLInputElement[][]>([]);
   
     useEffect(() => {
       for (let trackId = 0; trackId < drums.length; trackId++) {
         for (let i = 0; i < numOfSteps; i++) {
-          const inputElement = stepsRef.current[trackId][i] as HTMLInputElement;
+          const inputElement = stepsRef.current[trackId]?.[i];
           // Mirror the store both ways: a re-roll or an edit propagated from
           // another instance of this section can also clear cells.
           if (inputElement && drums[trackId]?.[i]) {

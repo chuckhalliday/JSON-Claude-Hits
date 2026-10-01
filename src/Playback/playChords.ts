@@ -1,7 +1,7 @@
 import { triggerMidi } from "./playFunctions";
 import { indexToLamp } from "../SongStructure/beatMapping";
 import { getAudioContext } from "./audioContext";
-import { runPreScheduledSequence, scheduleTimer, Register } from "./scheduler";
+import { runPreScheduledSequence, scheduleTimer, Register, SequenceTiming } from "./scheduler";
 import { ChordTones } from "../types";
 
 // "Synth" voice: the original single sawtooth with a flat attack/decay/sustain/release envelope.
@@ -110,7 +110,7 @@ function scheduleAcousticChordNote(audioContext: AudioContext, gainNode: GainNod
   });
 }
 
-export default async function playChords(midi: boolean, beat: number, pattern: string[], chords: ChordTones, groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true) {
+export default async function playChords(midi: boolean, beat: number, pattern: string[], chords: ChordTones, groove: number[], bpm: number, shouldStop?: () => boolean, onStep?: (lampIndex: number) => void, drumGroove?: number[], mute?: boolean, acoustic = true, timing?: SequenceTiming) {
     const beatDuration = 60 / bpm; // duration of one beat in seconds
     const audioContext = getAudioContext();
 
@@ -151,9 +151,14 @@ export default async function playChords(midi: boolean, beat: number, pattern: s
         }
       };
 
-      const finalIndex = await runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop);
-      gainNode.disconnect();
-      filterNode?.disconnect();
+      const finalIndex = await runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop, timing);
+      // With a lookahead the sequence resolves before its last chords finish,
+      // so leave the bus connected until they (and their release) have rung out.
+      const ringOut = Math.max(0, (timing?.endTime ?? 0) - audioContext.currentTime) + 1;
+      setTimeout(() => {
+        gainNode.disconnect();
+        filterNode?.disconnect();
+      }, ringOut * 1000);
       return finalIndex;
     } else {
       const velocity = Math.floor(Math.random() * (70 - 50 + 1) + 50);
@@ -168,6 +173,6 @@ export default async function playChords(midi: boolean, beat: number, pattern: s
         }
       };
 
-      return runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop);
+      return runPreScheduledSequence(beat, pattern.length, getDuration, onSchedule, shouldStop, timing);
     }
   }

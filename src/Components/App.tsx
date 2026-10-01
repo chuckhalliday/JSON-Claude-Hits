@@ -171,6 +171,13 @@ function App() {
   // pause (see stop-branch below) detect that its paused position is stale and
   // avoid clobbering the newer manual selection.
   const manualSeekEpochRef = React.useRef(0);
+  // Song playback chains parts gaplessly: each part hands off slightly before
+  // it ends, leaving the audio-clock time the next part must start at here.
+  const nextStartRef = React.useRef<number | undefined>(undefined);
+  // The part whose lamps playback may light. A part's last few step timers
+  // fire after the next part is already on screen; they must not light lamps
+  // in the new part's grid.
+  const activeVerseRef = React.useRef(-1);
 
   const partGrooves = song.songStructure[verse] ?? { drumGroove: [], bassGroove: [], chordsGroove: [] };
   const handleStep = useLampStep(lampsRef, verse, partGrooves.drumGroove, partGrooves.bassGroove, partGrooves.chordsGroove);
@@ -197,6 +204,12 @@ function App() {
 
   async function playSong(song: SongState, verse: number, drumBeat: number, bassBeat: number, chordBeat: number) {
     const seekEpochAtStart = manualSeekEpochRef.current;
+    const startAt = nextStartRef.current;
+    nextStartRef.current = undefined;
+    activeVerseRef.current = verse;
+    const step = (lampIndex: number) => {
+      if (activeVerseRef.current === verse) handleStep(lampIndex);
+    };
     let tempo = song.bpm - 60;
     //const output = new midi.Output()
     //output.openPort(3)
@@ -222,13 +235,14 @@ function App() {
         song.songStructure[verse].chordsGroove,
         song.songStructure[verse].chords,
         song.songStructure[verse].chordTones,
-        handleStep,
+        step,
         () => stopRef.current,
         includeDrums,
         includeBass,
         includeChords,
         acoustic,
-        song.key
+        song.key,
+        startAt
       );
 
       if (stopRef.current) {
@@ -254,6 +268,10 @@ function App() {
 
       const nextVerse = verse + 1
       if (nextVerse < song.songStructure.length) {
+        // Resolved just before this part ends: the next part starts exactly
+        // where this one finishes.
+        nextStartRef.current = result.endTime;
+        activeVerseRef.current = nextVerse;
         dispatch(setCurrentBeat([nextVerse, 0, 0, 0]))
         setCurrentPart(nextVerse);
         handlePartOpen(`${nextVerse}`);
@@ -366,6 +384,7 @@ function App() {
       dispatch(setIsPlaying({isPlaying: false}));
     } else {
       stopRef.current = false;
+      nextStartRef.current = undefined;
       if (!openedParts[0] && !openedParts[song.selectedBeat[0]]) {
         handlePartOpen(`${song.selectedBeat[0]}`)
       }
