@@ -13,8 +13,8 @@ import { useSelector, useDispatch } from "react-redux"
 import { playVerse } from '../Playback/playSong';
 import { getAudioContext } from '../Playback/audioContext';
 import { useLampStep } from '../Playback/useLampStep';
-import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPoint, toggleLoop } from '../reducers';
-import { LoopPoint, barAtStep, barsInPart, clampRegion, containsPoint, describePoint, partBars, partWindow, sum, trackWindow } from '../Playback/loop';
+import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop } from '../reducers';
+import { beatsInPart, clampRegion, containsPoint, describePoint, partWindow, stepBeat, sum, trackWindow } from '../Playback/loop';
 import type { AppDispatch } from '../store'
 import styles from "../Styles/App.module.scss"
 import { supabase } from '../supabaseClient'
@@ -470,7 +470,7 @@ function App() {
       const loop = song.loopEnabled ? clampRegion(song.loop, song.songStructure) : null;
       const [resumePart, resumeStep] = song.selectedBeat;
       const resumeGroove = song.songStructure[resumePart]?.drumGroove;
-      const here = resumeGroove ? { part: resumePart, bar: barAtStep(resumeGroove, resumeStep) } : null;
+      const here = resumeGroove ? { part: resumePart, beat: stepBeat(resumeGroove, resumeStep) } : null;
       if (loop && (!here || !containsPoint(loop, here))) {
         const bounds = partWindow(loop, loop.start.part, song.songStructure[loop.start.part]);
         const entry = [loop.start.part, bounds.drum.start, bounds.bass.start, bounds.chord.start];
@@ -484,22 +484,17 @@ function App() {
     }
   };
 
-  // The bar under the playhead: the lit lamp of the open part, falling back
-  // to the stored position.
-  const playheadPoint = (): LoopPoint | null => {
-    const partIndex = currentPart >= 0 ? currentPart : song.selectedBeat[0];
-    const part = song.songStructure[partIndex];
-    if (!part) return null;
-    const lit = partIndex === currentPart ? lampsRef.current.findIndex(l => l?.checked) : -1;
-    const step = lit >= 0 && lit < part.drumGroove.length ? lit : partIndex === song.selectedBeat[0] ? song.selectedBeat[1] : 0;
-    return { part: partIndex, bar: barAtStep(part.drumGroove, step) };
-  };
-
-  // Loop In / Out: drop a locator on the playhead's bar.
-  const setLoopAtPlayhead = (which: 'start' | 'end') => {
-    const point = playheadPoint();
-    if (point) dispatch(setLoopPoint({ which, point }));
-  };
+  // Set Start / Set End arm a pick: the next step lamp or bar number
+  // clicked becomes that loop point, and picking the start moves straight
+  // on to picking the end. Pressing the armed button again (or Esc) cancels.
+  const loopPick = song.loopPick ?? null;
+  const armLoopPick = (which: 'start' | 'end') => dispatch(setLoopPick(loopPick === which ? null : which));
+  useEffect(() => {
+    if (!loopPick) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dispatch(setLoopPick(null)); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [loopPick, dispatch]);
   const loopRegion = clampRegion(song.loop, song.songStructure);
   const loopOn = !!song.loopEnabled && loopRegion !== null;
 
@@ -565,7 +560,7 @@ function App() {
                   isOpen ? styles.openButton : '',
                   draggedPartIndex === index ? styles.draggingPart : '',
                   dragOverPartIndex === index ? styles.dragOverPart : '',
-                  loopRegion && barsInPart(loopRegion, index, partBars(songProps)) ? (loopOn ? styles.inLoop : styles.inLoopOff) : '',
+                  loopRegion && beatsInPart(loopRegion, index, sum(songProps.drumGroove)) ? (loopOn ? styles.inLoop : styles.inLoopOff) : '',
                 ].filter(Boolean).join(' ')}
                 style={{ width: `${Math.max(30, bars * 5)}px` }}
                 title={blockTitle}
@@ -681,17 +676,29 @@ function App() {
                 onClick={() => dispatch(toggleLoop())}
                 disabled={!loopRegion}
                 className={loopOn ? `${styles.button} ${styles.openButton}` : styles.button}
-                title={loopRegion ? 'Cycle playback between the loop points' : 'Set loop points first: Set Start / Set End at the playhead, or click a bar number above the drum grid'}
+                title={loopRegion ? 'Cycle playback between the loop points' : 'Set loop points first: Set Start, then click where it starts and where it ends - or click a bar number above the drum grid'}
               >
                 ⟳ Loop
               </button>
-              <button onClick={() => setLoopAtPlayhead('start')} className={styles.button} title="Set the loop start to the playhead's bar">Set Start</button>
-              <button onClick={() => setLoopAtPlayhead('end')} className={styles.button} title="Set the loop end to the playhead's bar">Set End</button>
+              <button
+                onClick={() => armLoopPick('start')}
+                className={loopPick === 'start' ? `${styles.button} ${styles.pickArmed}` : styles.button}
+                aria-pressed={loopPick === 'start'}
+                title="Then click a step lamp or bar number to start the loop there"
+              >Set Start</button>
+              <button
+                onClick={() => armLoopPick('end')}
+                className={loopPick === 'end' ? `${styles.button} ${styles.pickArmed}` : styles.button}
+                aria-pressed={loopPick === 'end'}
+                title="Then click a step lamp or bar number to end the loop there (that step or bar is included)"
+              >Set End</button>
             </div>
             <span className={styles.loopReadout}>
-              {loopRegion
-                ? `${describePoint(loopRegion.start, song.songStructure)} → ${describePoint(loopRegion.end, song.songStructure)}`
-                : 'No loop set'}
+              {loopPick
+                ? `Click a step or bar number for the loop ${loopPick} (Esc to cancel)`
+                : loopRegion
+                  ? `${describePoint(loopRegion.start, song.songStructure)} → ${describePoint(loopRegion.end, song.songStructure)}`
+                  : 'No loop set'}
             </span>
           </div>
           <div className={styles.midiControls}>

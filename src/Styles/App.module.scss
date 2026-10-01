@@ -649,3 +649,9 @@ input[type="range"].bpm::-moz-range-thumb {
     box-sizing: border-box;
     background-color: #fff;
 }
+
+// Set Start / Set End armed: waiting for a step or bar click.
+.pickArmed {
+    background-color: #ff8c00 !important;
+    color: #fff;
+}

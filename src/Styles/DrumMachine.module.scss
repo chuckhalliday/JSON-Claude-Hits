@@ -203,3 +203,21 @@ $rowGap: 8px;
     background: #ffe0b3;
   }
 }
+
+// While Set Start / Set End is armed, lamps and bar numbers are targets.
+.machine[loop-pick] {
+  .lamp__content {
+    box-shadow: 0 0 0 2px #ff8c00;
+    cursor: crosshair;
+  }
+
+  .lamp {
+    cursor: crosshair;
+  }
+
+  .barTag {
+    border-color: #ff8c00;
+    background: #fff3e0;
+    cursor: crosshair;
+  }
+}

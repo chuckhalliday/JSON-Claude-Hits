@@ -1,7 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { playDrums } from "../Playback/playSong";
-import { setDrumState, SongState, setCurrentBeat, setLoop, extendLoop } from "../reducers";
-import { barsInPart, clampRegion, partBars } from "../Playback/loop";
+import { setDrumState, SongState, setCurrentBeat, setLoop, extendLoop, pickLoopSpan } from "../reducers";
+import { barSpan, clampRegion, overlapsRegion, stepSpan, sum } from "../Playback/loop";
 import { useDispatch, useSelector } from "react-redux";
 import { PlayHandle } from "./Piano";
 import styles from "../Styles/DrumMachine.module.scss";
@@ -110,16 +110,26 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
     });
   }
   const loopRegion = clampRegion(song.loop, song.songStructure);
-  const loopBars = loopRegion ? barsInPart(loopRegion, part, partBars(song.songStructure[part])) : null;
-  const inLoop = (bar: number) => !!loopBars && bar >= loopBars[0] && bar <= loopBars[1];
+  const partBeats = sum(drumGroove);
+  const stepInLoop = (step: number) => {
+    if (!loopRegion) return false;
+    const span = stepSpan(part, drumGroove, step);
+    return overlapsRegion(loopRegion, part, partBeats, span.from, span.to);
+  };
+  const picking = song.loopPick ?? null;
 
-  // Click a bar number to loop that bar; shift-click to stretch the loop to
-  // include it (across parts too).
+  // With Set Start / Set End armed, a clicked bar number sets that loop
+  // point. Otherwise click a bar number to loop that bar; shift-click to
+  // stretch the loop to include it (across parts too).
   const handleBarClick = (event: React.MouseEvent, bar: number) => {
     event.preventDefault();
     event.stopPropagation();
-    const point = { part, bar };
-    dispatch(event.shiftKey ? extendLoop(point) : setLoop({ start: point, end: point }));
+    const span = barSpan(part, bar);
+    if (picking) {
+      dispatch(pickLoopSpan(span));
+    } else {
+      dispatch(event.shiftKey ? extendLoop(span) : setLoop({ start: { part, beat: span.from }, end: { part, beat: span.to } }));
+    }
   };
 
 
@@ -179,7 +189,7 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
   }, [onRenderWidthChange]);
 
   return (
-    <div className={styles.machine} ref={machineRef}>
+    <div className={styles.machine} ref={machineRef} loop-pick={picking ?? undefined}>
       {/* Renders titles */}
       <div className={styles.labelList}>
         <div>Crash</div>
@@ -205,7 +215,7 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
                 className={styles.barCell}
                 measure-end={spacing.measure}
                 beat-end={spacing.beat}
-                in-loop={inLoop(bar) ? (song.loopEnabled ? 'on' : 'off') : undefined}
+                in-loop={stepInLoop(stepId) ? (song.loopEnabled ? 'on' : 'off') : undefined}
               >
                 {barStart[stepId] && (
                   <button
@@ -240,7 +250,14 @@ const DrumMachine = forwardRef<PlayHandle, DrumMachineProps>(function DrumMachin
                   lampsRef.current[stepId] = elm;
                 }}
                 className={styles.lamp__input}
-                onClick={() => {
+                onClick={(event) => {
+                  // With Set Start / Set End armed, the lamp picks a loop
+                  // point (that step) instead of moving the playhead.
+                  if (picking) {
+                    event.preventDefault();
+                    dispatch(pickLoopSpan(stepSpan(part, drumGroove, stepId)));
+                    return;
+                  }
                   // Not onChange: handleStep mutates lamp.checked directly (see
                   // useLampStep) to avoid a re-render on every playback step.
                   // That bypasses React's change-detection tracker for radios,

@@ -6,7 +6,7 @@ import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance 
 import { realizeSong, realizeSection, realizeInstance, assignStepIds } from "./Core/realize";
 import { editBass, editDrum, editChordTone } from "./Core/edits";
 import { keyName } from "./Core/theory";
-import { LoopPoint, LoopRegion, comparePoints, regionBetween } from "./Playback/loop";
+import { LoopRegion, LoopSpan, comparePoints } from "./Playback/loop";
 
 export interface SongState {
     isPlaying: boolean,
@@ -26,7 +26,12 @@ export interface SongState {
     doc?: SongDoc | null,
     // Loop region (bar-snapped locators) and whether playback cycles it.
     loop?: LoopRegion | null,
-    loopEnabled?: boolean
+    loopEnabled?: boolean,
+    // Set Start / Set End: which loop point the next clicked step or bar
+    // number sets, and the item picked as the start (so the end pick can
+    // complete the region from it).
+    loopPick?: 'start' | 'end' | null,
+    loopAnchor?: LoopSpan | null
 }
 
 // The song tree starts empty and deterministic. The first song is produced by
@@ -44,7 +49,9 @@ const initialState: SongState = {
     params: null,
     doc: null,
     loop: null,
-    loopEnabled: false
+    loopEnabled: false,
+    loopPick: null,
+    loopAnchor: null
 };
 
 // Everything setSong needs to load a sculpted document.
@@ -96,6 +103,8 @@ const song = createSlice({
         // Bar positions belong to the old song.
         state.loop = null;
         state.loopEnabled = false;
+        state.loopPick = null;
+        state.loopAnchor = null;
       },
       setBassState: (state, action: PayloadAction<{ index: number, bassNoteLocations: NoteLocation[] }>) => {
         const sculpted = docFor(state, action.payload.index);
@@ -151,6 +160,8 @@ const song = createSlice({
         // The loop is defined by part positions, which a reorder scrambles.
         state.loop = null;
         state.loopEnabled = false;
+        state.loopPick = null;
+        state.loopAnchor = null;
         if (state.doc && state.doc.form.length === state.songStructure.length) {
           // Transitions (crashes, fills) depend on neighbours, so re-render all.
           applyDoc(state, moveInstance(current(state).doc!, from, to));
@@ -163,23 +174,51 @@ const song = createSlice({
       setLoop: (state, action: PayloadAction<LoopRegion | null>) => {
         state.loop = action.payload;
         state.loopEnabled = action.payload !== null;
+        state.loopPick = null;
+        state.loopAnchor = null;
       },
-      // Move one locator; the other stays. With no loop yet, both land here.
-      setLoopPoint: (state, action: PayloadAction<{ which: 'start' | 'end', point: LoopPoint }>) => {
-        const { which, point } = action.payload;
+      // Arm Set Start / Set End: the next clicked step or bar sets it.
+      setLoopPick: (state, action: PayloadAction<'start' | 'end' | null>) => {
+        state.loopPick = action.payload;
+        if (action.payload !== 'end') state.loopAnchor = null;
+      },
+      // A step or bar clicked while a pick is armed. Picking the start moves
+      // straight on to picking the end; picking the end completes the loop.
+      pickLoopSpan: (state, action: PayloadAction<LoopSpan>) => {
+        const span = action.payload;
         const loop = state.loop;
-        state.loop = !loop ? { start: point, end: point }
-          : which === 'start' ? regionBetween(point, loop.end) : regionBetween(loop.start, point);
+        if (state.loopPick === 'start' || !loop) {
+          const start = { part: span.part, beat: span.from };
+          // Keep the old end if it still lies past the new start; otherwise
+          // loop just the clicked item until the end is picked.
+          const end = loop && comparePoints(loop.end, { part: span.part, beat: span.to }) >= 0 ? loop.end : { part: span.part, beat: span.to };
+          state.loop = { start, end };
+          state.loopAnchor = span;
+          state.loopPick = 'end';
+        } else if (state.loopPick === 'end') {
+          // From the start item (or, with no start picked this time, the
+          // loop as it stands) to the clicked item, in either order.
+          const anchor = state.loopAnchor ?? { part: loop.start.part, from: loop.start.beat, to: loop.start.beat };
+          if (comparePoints({ part: span.part, beat: span.from }, { part: anchor.part, beat: anchor.from }) >= 0) {
+            state.loop = { start: { part: anchor.part, beat: anchor.from }, end: { part: span.part, beat: span.to } };
+          } else {
+            const anchorEnd = state.loopAnchor ? { part: anchor.part, beat: anchor.to } : loop.end;
+            state.loop = { start: { part: span.part, beat: span.from }, end: anchorEnd };
+          }
+          state.loopPick = null;
+          state.loopAnchor = null;
+        }
         state.loopEnabled = true;
       },
-      // Grow the loop to include a bar (shift-click).
-      extendLoop: (state, action: PayloadAction<LoopPoint>) => {
-        const point = action.payload;
+      // Grow the loop to cover a bar or step (shift-click).
+      extendLoop: (state, action: PayloadAction<LoopSpan>) => {
+        const span = action.payload;
         const loop = state.loop;
-        state.loop = !loop ? { start: point, end: point } : {
-          start: comparePoints(point, loop.start) < 0 ? point : loop.start,
-          end: comparePoints(point, loop.end) > 0 ? point : loop.end,
-        };
+        const from = { part: span.part, beat: span.from };
+        const to = { part: span.part, beat: span.to };
+        state.loop = loop
+          ? { start: comparePoints(from, loop.start) < 0 ? from : loop.start, end: comparePoints(to, loop.end) > 0 ? to : loop.end }
+          : { start: from, end: to };
         state.loopEnabled = true;
       },
       toggleLoop: (state) => {
@@ -215,7 +254,7 @@ const song = createSlice({
     },
   });
 
-export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPoint, extendLoop, toggleLoop } = song.actions;
+export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop } = song.actions;
 
 // Thunk: generate a fresh form-first song and load it into the store.
 // Dispatched on mount and by the song tabs. Pass a seed (or full options)
