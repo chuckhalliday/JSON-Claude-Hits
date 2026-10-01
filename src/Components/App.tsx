@@ -388,6 +388,19 @@ function App() {
 
   const [renderWidth, setRenderWidth] = useState(0);
 
+  // Publish the footer's live height (it wraps on narrow windows and grows
+  // with the song tabs) so the opened part can fill the space above it.
+  const footerRef = React.useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const footer = footerRef.current;
+    if (!footer) return;
+    const publish = () => document.documentElement.style.setProperty('--footer-height', `${footer.offsetHeight}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(footer);
+    return () => observer.disconnect();
+  }, [authenticated]);
+
   // Stable identity so DrumMachine's width-measuring effect (which lists this in
   // its deps) doesn't re-run on every App render. The prev-guard also stops a
   // feedback loop where measuring width triggers a re-render that re-measures.
@@ -601,7 +614,7 @@ function App() {
           {showInfoScreen && !anyPartOpen && <Info />}
         </div>
         {/* Renders controls */}
-        <div className={styles.footer}>
+        <div className={styles.footer} ref={footerRef}>
         <div className={styles.controls}>
           <button className={styles.key} onClick={handleGenerateClick}>Key of :<br />{song.key}</button>
           {!midi && (
