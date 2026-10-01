@@ -120,20 +120,18 @@ export function spellRoot(rel: number, key: Key): Spelled {
   return spellPc(key.tonic + r, key);
 }
 
-// Letter steps above a chord root for each interval (in semitones), so chord
-// tones are spelled as thirds/fifths/sevenths of the root: D major's third
-// is F#, A7's is C#, B°'s fifth is F.
-const INTERVAL_LETTER_STEPS: Record<number, number> = { 0: 0, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 4, 9: 6, 10: 6, 11: 6 };
-
-// Spell a pitch heard against a chord: chord tones by their interval from
-// the chord's root, anything else (passing/approach notes) by the key.
+// Spell a pitch heard against a chord: chord tones by their letter distance
+// from the chord's root (each quality says which letter every tone takes:
+// D's third is F#, A7's is C#, Bb6's sixth is G), anything else - passing
+// and approach notes, or a tone that would need a double accidental, like
+// a °7's double-flat seventh - by the key.
 export function spellInChord(pc: number, chord: Pick<ChordEvent, 'root' | 'quality'>, key: Key): Spelled {
   const rel = mod12(pc - key.tonic);
-  const intervals = QUALITY_INTERVALS[chord.quality];
-  const k = intervals.findIndex(i => mod12(chord.root + i) === rel);
+  const spec = QUALITIES[chord.quality];
+  const k = spec.intervals.findIndex(i => mod12(chord.root + i) === rel);
   if (k === -1) return spellPc(pc, key);
   const root = spellRoot(chord.root, key);
-  const letterIndex = (LETTERS.indexOf(root.letter) + INTERVAL_LETTER_STEPS[intervals[k]]) % 7;
+  const letterIndex = (LETTERS.indexOf(root.letter) + spec.letters[k]) % 7;
   const acc = accFor(letterIndex, pc);
   if (Math.abs(acc) > 1) return spellPc(pc, key);
   return tidy({ letter: LETTERS[letterIndex], acc });
@@ -151,16 +149,49 @@ export const midiToFreq = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 
 // ---- Chords -------------------------------------------------------------
 
-export type Quality = 'maj' | 'min' | 'dim' | 'aug' | 'sus4' | '7' | 'maj7' | 'm7' | 'm7b5' | 'dim7';
+export type Quality =
+  | 'maj' | 'min' | 'dim' | 'aug' | 'sus2' | 'sus4' | '6' | 'm6'
+  | '7' | 'maj7' | 'm7' | 'm7b5' | 'dim7' | '7sus4' | 'add9' | '9' | 'maj9' | 'm9';
 
-export const QUALITY_INTERVALS: Record<Quality, number[]> = {
-  maj: [0, 4, 7], min: [0, 3, 7], dim: [0, 3, 6], aug: [0, 4, 8], sus4: [0, 5, 7],
-  '7': [0, 4, 7, 10], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], m7b5: [0, 3, 6, 10], dim7: [0, 3, 6, 9],
+interface QualitySpec {
+  intervals: number[]; // semitones above the root, root first
+  letters: number[]; // letter steps above the root for each tone (spelling)
+  symbol: string; // chord-symbol suffix: Cm7, C°, Csus4
+  roman: string; // Roman-numeral suffix: ii7, viiø7, Iadd6
+  minor: boolean; // lowercase numeral
+  name: string; // for menus
+}
+
+// Every chord quality the app knows, in menu order.
+export const QUALITIES: Record<Quality, QualitySpec> = {
+  maj: { intervals: [0, 4, 7], letters: [0, 2, 4], symbol: '', roman: '', minor: false, name: 'major' },
+  min: { intervals: [0, 3, 7], letters: [0, 2, 4], symbol: 'm', roman: '', minor: true, name: 'minor' },
+  dim: { intervals: [0, 3, 6], letters: [0, 2, 4], symbol: '°', roman: '°', minor: true, name: 'diminished' },
+  aug: { intervals: [0, 4, 8], letters: [0, 2, 4], symbol: '+', roman: '+', minor: false, name: 'augmented' },
+  sus2: { intervals: [0, 2, 7], letters: [0, 1, 4], symbol: 'sus2', roman: 'sus2', minor: false, name: 'sus2' },
+  sus4: { intervals: [0, 5, 7], letters: [0, 3, 4], symbol: 'sus4', roman: 'sus4', minor: false, name: 'sus4' },
+  '6': { intervals: [0, 4, 7, 9], letters: [0, 2, 4, 5], symbol: '6', roman: 'add6', minor: false, name: 'major 6' },
+  m6: { intervals: [0, 3, 7, 9], letters: [0, 2, 4, 5], symbol: 'm6', roman: 'add6', minor: true, name: 'minor 6' },
+  '7': { intervals: [0, 4, 7, 10], letters: [0, 2, 4, 6], symbol: '7', roman: '7', minor: false, name: 'dominant 7' },
+  maj7: { intervals: [0, 4, 7, 11], letters: [0, 2, 4, 6], symbol: 'maj7', roman: 'maj7', minor: false, name: 'major 7' },
+  m7: { intervals: [0, 3, 7, 10], letters: [0, 2, 4, 6], symbol: 'm7', roman: '7', minor: true, name: 'minor 7' },
+  m7b5: { intervals: [0, 3, 6, 10], letters: [0, 2, 4, 6], symbol: 'm7b5', roman: 'ø7', minor: true, name: 'half-diminished' },
+  dim7: { intervals: [0, 3, 6, 9], letters: [0, 2, 4, 6], symbol: '°7', roman: '°7', minor: true, name: 'diminished 7' },
+  '7sus4': { intervals: [0, 5, 7, 10], letters: [0, 3, 4, 6], symbol: '7sus4', roman: '7sus4', minor: false, name: '7sus4' },
+  add9: { intervals: [0, 4, 7, 14], letters: [0, 2, 4, 1], symbol: 'add9', roman: 'add9', minor: false, name: 'add 9' },
+  '9': { intervals: [0, 4, 7, 10, 14], letters: [0, 2, 4, 6, 1], symbol: '9', roman: '9', minor: false, name: 'dominant 9' },
+  maj9: { intervals: [0, 4, 7, 11, 14], letters: [0, 2, 4, 6, 1], symbol: 'maj9', roman: 'maj9', minor: false, name: 'major 9' },
+  m9: { intervals: [0, 3, 7, 10, 14], letters: [0, 2, 4, 6, 1], symbol: 'm9', roman: '9', minor: true, name: 'minor 9' },
 };
 
-const SYMBOL_SUFFIX: Record<Quality, string> = {
-  maj: '', min: 'm', dim: '°', aug: '+', sus4: 'sus4', '7': '7', maj7: 'maj7', m7: 'm7', m7b5: 'm7b5', dim7: '°7',
-};
+// Menu order. (Not Object.keys: integer-like keys such as '6' and '7' would
+// be listed first.)
+export const QUALITY_LIST: Quality[] = [
+  'maj', 'min', 'dim', 'aug', 'sus2', 'sus4', '6', 'm6', '7', 'maj7', 'm7', 'm7b5', 'dim7', '7sus4', 'add9', '9', 'maj9', 'm9',
+];
+
+export const QUALITY_INTERVALS: Record<Quality, number[]> =
+  Object.fromEntries(QUALITY_LIST.map(q => [q, QUALITIES[q].intervals])) as Record<Quality, number[]>;
 
 export type HarmonicFunction = 'T' | 'PD' | 'D';
 
@@ -180,14 +211,26 @@ export const chordIntervals = (c: Pick<ChordEvent, 'quality'>) => QUALITY_INTERV
 // Pitch classes relative to the tonic, root first.
 export const chordTones = (c: Pick<ChordEvent, 'root' | 'quality'>) => chordIntervals(c).map(i => mod12(c.root + i));
 
-export const chordBassPc = (c: Pick<ChordEvent, 'root' | 'quality' | 'inversion'>) =>
-  mod12(c.root + chordIntervals(c)[Math.min(c.inversion, 2)]);
+// Index of the chord's seventh (or the °7's diminished seventh), or -1.
+export function seventhIndex(q: Quality): number {
+  return QUALITIES[q].intervals.findIndex(i => i === 10 || i === 11 || (q === 'dim7' && i === 9));
+}
 
-export const hasSeventh = (q: Quality) => QUALITY_INTERVALS[q].length === 4;
+export const hasSeventh = (q: Quality) => seventhIndex(q) !== -1;
+
+// Index of the chord's third, or -1 for sus chords.
+export const thirdIndex = (q: Quality) => QUALITIES[q].intervals.findIndex(i => i === 3 || i === 4);
+
+// Positions a chord can stand in: root, then each chord tone below the
+// ninth in the bass (3rd, 5th, and the 7th or 6th of four-note chords).
+export const inversionCount = (q: Quality) => QUALITIES[q].intervals.filter(i => i < 12).length;
+
+export const chordBassPc = (c: Pick<ChordEvent, 'root' | 'quality' | 'inversion'>) =>
+  mod12(c.root + chordIntervals(c)[Math.min(c.inversion, inversionCount(c.quality) - 1)]);
 
 export function chordSymbol(c: ChordEvent, key: Key): string {
   const root = spelledName(spellRoot(c.root, key));
-  const base = root + SYMBOL_SUFFIX[c.quality];
+  const base = root + QUALITIES[c.quality].symbol;
   if (c.inversion === 0) return base;
   return `${base}/${spelledName(spellInChord(key.tonic + chordBassPc(c), c, key))}`;
 }
@@ -204,17 +247,20 @@ function numeral(root: number, quality: Quality, mode: Mode): string {
   const r = mod12(root);
   const modeDegree = MODE_STEPS[mode].indexOf(r);
   const [degree, prefix] = modeDegree !== -1 ? [modeDegree, ''] : MAJOR_DEGREE_OF[r];
-  const lower = quality === 'min' || quality === 'dim' || quality === 'm7' || quality === 'm7b5' || quality === 'dim7';
-  const base = lower ? NUMERALS[degree].toLowerCase() : NUMERALS[degree];
-  const suffix: Record<Quality, string> = {
-    maj: '', min: '', dim: '°', aug: '+', sus4: 'sus4', '7': '7', maj7: 'maj7', m7: '7', m7b5: 'ø7', dim7: '°7',
-  };
-  return prefix + base + suffix[quality];
+  const spec = QUALITIES[quality];
+  return prefix + (spec.minor ? NUMERALS[degree].toLowerCase() : NUMERALS[degree]) + spec.roman;
+}
+
+// Figured-bass inversion symbols.
+function inversionFigure(c: Pick<ChordEvent, 'quality' | 'inversion'>): string {
+  if (c.inversion === 0) return '';
+  if (hasSeventh(c.quality)) return ['', '6/5', '4/3', '4/2'][c.inversion] ?? '';
+  return ['', '6', '6/4', '4/2'][c.inversion] ?? '';
 }
 
 export function romanNumeral(c: ChordEvent, mode: Mode): string {
-  const inv = c.inversion === 0 ? '' : hasSeventh(c.quality) ? (c.inversion === 1 ? '6/5' : '4/3') : (c.inversion === 1 ? '6' : '6/4');
-  // An inverted seventh chord's figure (6/5, 4/3) replaces its 7.
+  const inv = inversionFigure(c);
+  // An inverted seventh chord's figure (6/5, 4/3, 4/2) replaces its 7.
   const figured = (n: string) => (inv && hasSeventh(c.quality) ? n.replace(/7$/, '') : n) + inv;
   if (c.appliedTo !== undefined) {
     const targetQuality = diatonicTriad(c.appliedTo, mode) ?? 'maj';

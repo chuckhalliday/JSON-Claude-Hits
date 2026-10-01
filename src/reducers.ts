@@ -4,7 +4,8 @@ import { bassPitch } from "./SongStructure/bassPitch";
 import { SongDoc, Layer, GenerateOptions } from "./Core/doc";
 import { generateDoc, regenerateLayer, setLock, setInstanceEnergy, moveInstance } from "./Core/generate";
 import { realizeSong, realizeSection, realizeInstance, assignStepIds } from "./Core/realize";
-import { editBass, editDrum, editChordTone } from "./Core/edits";
+import { editBass, editDrum, editChordTone, editChord } from "./Core/edits";
+import { ChordEvent } from "./Core/theory";
 import { keyName } from "./Core/theory";
 import { LoopRegion, LoopSpan, comparePoints } from "./Playback/loop";
 
@@ -224,6 +225,14 @@ const song = createSlice({
       toggleLoop: (state) => {
         if (state.loop) state.loopEnabled = !state.loopEnabled;
       },
+      // Change one chord of a section's progression (root/quality, applied or
+      // borrowed chords, inversion) - every instance follows.
+      editHarmony: (state, action: PayloadAction<{ part: number, chord: number, change: Partial<Pick<ChordEvent, 'root' | 'quality' | 'inversion' | 'appliedTo' | 'fn'>> }>) => {
+        const sculpted = docFor(state, action.payload.part);
+        if (!sculpted) return;
+        const { part, chord, change } = action.payload;
+        applyDoc(state, editChord(sculpted.doc, part, chord, change), sculpted.sectionId);
+      },
       // Re-roll one layer of one section (unlocked dependents follow).
       rerollLayer: (state, action: PayloadAction<{ sectionId: string, layer: Layer }>) => {
         if (!state.doc) return;
@@ -254,7 +263,7 @@ const song = createSlice({
     },
   });
 
-export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop } = song.actions;
+export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony } = song.actions;
 
 // Thunk: generate a fresh form-first song and load it into the store.
 // Dispatched on mount and by the song tabs. Pass a seed (or full options)

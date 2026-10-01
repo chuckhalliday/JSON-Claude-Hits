@@ -7,7 +7,7 @@
 // section's register so progressions don't drift. Common tones hold; the
 // rest move by the smallest steps.
 
-import { ChordEvent, Key, chordTones, hasSeventh, mod12, VOICING_MIN, VOICING_MAX } from './theory';
+import { ChordEvent, Key, QUALITIES, chordTones, hasSeventh, mod12, seventhIndex, thirdIndex, VOICING_MIN, VOICING_MAX } from './theory';
 import { Rng } from './seeds';
 
 export type VoicingStyle = 'close' | 'drop2' | 'shell';
@@ -33,8 +33,12 @@ function closeVoicings(pcs: number[], tonicMidi: number): number[][] {
 function candidates(chord: ChordEvent, tonicMidi: number, style: VoicingStyle, size: number): number[][] {
   const tones = chordTones(chord);
   let pcs = tones;
-  if (style === 'shell' && hasSeventh(chord.quality)) {
-    pcs = [tones[0], tones[1], tones[3]];
+  const third = thirdIndex(chord.quality);
+  if (style === 'shell' && hasSeventh(chord.quality) && third !== -1) {
+    pcs = [tones[0], tones[third], tones[seventhIndex(chord.quality)]];
+  } else if (tones.length >= 5) {
+    // Ninth chords drop the fifth, as players usually do.
+    pcs = tones.filter((_, i) => QUALITIES[chord.quality].intervals[i] !== 7);
   } else if (tones.length === 3 && size === 4) {
     pcs = [...tones, tones[0]];
   }
@@ -111,7 +115,10 @@ export function guideTones(harmony: ChordEvent[], key: Key): number[] {
   let prev = 67;
   for (const chord of harmony) {
     const tones = chordTones(chord);
-    const guides = chord.quality === 'sus4' ? [tones[1]] : hasSeventh(chord.quality) ? [tones[1], tones[3]] : [tones[1]];
+    // The 3rd and 7th (or the suspended tone / added 6th standing in).
+    const third = thirdIndex(chord.quality);
+    const seventh = seventhIndex(chord.quality);
+    const guides = [third !== -1 ? tones[third] : tones[1], ...(seventh !== -1 ? [tones[seventh]] : tones.length === 4 ? [tones[3]] : [])];
     let best = prev;
     let bestDistance = Infinity;
     for (let m = 60; m <= 76; m++) {
@@ -135,4 +142,28 @@ export function remapVoicings(oldHarmony: ChordEvent[], oldVoicings: number[][],
     const index = oldHarmony.findIndex(o => c.start >= o.start && c.start < o.start + o.dur);
     return [...(oldVoicings[index === -1 ? oldVoicings.length - 1 : index] ?? [])];
   });
+}
+
+// Re-voice one chord after it has been changed by hand, led smoothly from
+// the chord before it and into the chord after it.
+export function revoiceChord(harmony: ChordEvent[], voicing: number[][], i: number, key: Key, energy: number): number[] {
+  const tonicMidi = 60 + key.tonic;
+  const prev = voicing[i - 1] ?? null;
+  const next = voicing[i + 1] ?? null;
+  const size = (voicing[i]?.length ?? 3) >= 4 || energy > 0.55 ? 4 : 3;
+  const spread = (v: number[] | null) => (v && v.length ? v[v.length - 1] - v[0] : 0);
+  const style: VoicingStyle = spread(prev) > 12 ? 'drop2' : 'close';
+  let options = candidates(harmony[i], tonicMidi, style, size);
+  if (options.length === 0) options = candidates(harmony[i], tonicMidi, 'close', 3);
+  const target = prev ? centre(prev) : 62 + Math.round(energy * 6);
+  let best = options[0];
+  let bestCost = Infinity;
+  for (const v of options) {
+    const cost = (prev ? motion(prev, v) : 0) + (next ? motion(v, next) * 0.7 : 0) + Math.abs(centre(v) - target) * 0.35;
+    if (cost < bestCost) {
+      best = v;
+      bestCost = cost;
+    }
+  }
+  return best ?? [];
 }

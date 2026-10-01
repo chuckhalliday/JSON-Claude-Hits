@@ -1,5 +1,8 @@
+import { useCallback, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { SongState, rerollLayer, toggleLock, setPartEnergy, setLoop } from "../reducers";
+import { SongState, rerollLayer, toggleLock, setPartEnergy, setLoop, editHarmony } from "../reducers";
+import ChordMenu, { ChordMenuKind } from "./ChordMenu";
+import { inversionOptions } from "../Core/chordOptions";
 import { clampRegion, comparePoints, sum } from "../Playback/loop";
 import { Layer, LAYERS, LAYER_DEPENDENTS } from "../Core/doc";
 import { spellInChord, spellPc, spelledName } from "../Core/theory";
@@ -24,6 +27,9 @@ const LAYER_INFO: Record<Layer, { label: string; hint: string }> = {
 export default function SectionPanel({ part }: SectionPanelProps) {
   const dispatch = useDispatch();
   const song = useSelector((state: { song: SongState }) => state.song);
+  // Which chord cell's menu is open, and which menu.
+  const [menu, setMenu] = useState<{ chord: number, kind: ChordMenuKind } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const doc = song.doc;
   const p = song.songStructure[part];
   if (!doc || !p?.sectionId || !doc.sections[p.sectionId]) return null;
@@ -60,15 +66,31 @@ export default function SectionPanel({ part }: SectionPanelProps) {
         </label>
       </div>
       <div className={styles.progression}>
-        {p.chords.map((chord, i) => (
-          <span key={i} className={styles.chordCell} style={{ flexGrow: p.chordsGroove[i] }}>
-            <span className={styles.chordSymbol}>{chord}</span>
-            <span className={styles.chordRoman}>{p.roman?.[i]}</span>
-            {p.guideTones?.[i] ? (
-              <span className={styles.guideTone} title="Guide tone (3rd/7th)">{spelledName(section.harmony[i] ? spellInChord(p.guideTones[i], section.harmony[i], key) : spellPc(p.guideTones[i], key))}</span>
-            ) : null}
-          </span>
-        ))}
+        {p.chords.map((chord, i) => {
+          const event = section.harmony[i];
+          const toggle = (kind: ChordMenuKind) => setMenu(menu?.chord === i && menu.kind === kind ? null : { chord: i, kind });
+          const bass = event ? inversionOptions(event, key)[Math.min(event.inversion, inversionOptions(event, key).length - 1)]?.bass : '';
+          return (
+            <span key={i} className={styles.chordCell} style={{ flexGrow: p.chordsGroove[i] }}>
+              <button className={styles.chordSymbol} onClick={() => toggle('chord')} title="Change to any chord">{chord}</button>
+              <button className={styles.chordRoman} onClick={() => toggle('roman')} title="Alternatives for this chord">{p.roman?.[i]}</button>
+              <button className={styles.chordBass} onClick={() => toggle('bass')} title="Bass note: inversions">bass {bass}</button>
+              {p.guideTones?.[i] ? (
+                <span className={styles.guideTone} title="Guide tone (3rd/7th)">guide {spelledName(event ? spellInChord(p.guideTones[i], event, key) : spellPc(p.guideTones[i], key))}</span>
+              ) : null}
+              {menu?.chord === i && event && (
+                <ChordMenu
+                  kind={menu.kind}
+                  chord={event}
+                  chordKey={key}
+                  alignRight={i >= p.chords.length / 2}
+                  onPick={(change) => dispatch(editHarmony({ part, chord: i, change }))}
+                  onClose={closeMenu}
+                />
+              )}
+            </span>
+          );
+        })}
       </div>
       <div className={styles.layerRow}>
         {LAYERS.map(layer => {
@@ -99,7 +121,7 @@ export default function SectionPanel({ part }: SectionPanelProps) {
         })}
       </div>
       <p className={styles.sectionNote}>
-        Edits here apply to every {section.label.toLowerCase()} and lock that layer. Drum edits inside a fill or crash stay on this instance.
+        Click a chord, its numeral or its bass note to change it. Edits here apply to every {section.label.toLowerCase()} and lock that layer. Drum edits inside a fill or crash stay on this instance.
       </p>
     </div>
   );
