@@ -2,11 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react'
 import Info from './Info';
 import Generate from './Generate';
 import Save from './Save';
-import Sounds from './Sounds';
 import SectionPanel from './SectionPanel';
 import { SHORT_LABELS } from '../Core/form';
 import { downloadMidi } from '../Core/exportMidi';
-import { PaletteInput } from '../Core/timbre';
 import { SectionLabel } from '../Core/doc';
 import DrumMachine from "./DrumMachine";
 import BassStaff from "./BassStaff";
@@ -61,9 +59,6 @@ function App() {
   const [authenticated, setAuthenticated] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [saveScreen, setSaveScreen] = useState(false);
-  const [soundsScreen, setSoundsScreen] = useState(false);
-  // Which suggested sound combination the Sounds panel shows (0 = best match).
-  const [soundVariant, setSoundVariant] = useState(0);
   const anyPartOpen = Object.values(openedParts).some(Boolean);
 
   // T1-T10 song-generation slots. Only the active tab's song lives in Redux;
@@ -587,21 +582,10 @@ function App() {
     dispatch(setAcoustic({ acoustic: !acoustic }));
   };
 
-  // A new song starts back on its best-matching sounds.
-  useEffect(() => setSoundVariant(0), [song.seed]);
-  const paletteInput: PaletteInput = React.useMemo(() => ({
-    songStructure: song.songStructure,
-    bpm: song.bpm,
-    key: song.key,
-    doc: song.doc,
-    tuning: song.doc?.tuning ?? song.params?.tuning,
-  }), [song.songStructure, song.bpm, song.key, song.doc, song.params]);
-  const exportName = `${song.key.replace(/\s+/g, '-')}-${song.bpm}bpm${song.seed != null ? `-${song.seed}` : ''}`;
-  const handleCloseSounds = useCallback(() => setSoundsScreen(false), []);
-
   // Download the song (with every edit) as a Standard MIDI File for a DAW.
   const handleExport = () => {
-    downloadMidi({ songStructure: song.songStructure, bpm: song.bpm, key: song.key, title: `Song in ${song.key}` }, exportName);
+    const filename = `${song.key.replace(/\s+/g, '-')}-${song.bpm}bpm${song.seed != null ? `-${song.seed}` : ''}`;
+    downloadMidi({ songStructure: song.songStructure, bpm: song.bpm, key: song.key, title: `Song in ${song.key}` }, filename);
   };
 
   const handleMidi = async () => {
@@ -627,18 +611,6 @@ function App() {
         {saveScreen && (
           <div className={styles.generateOverlay}>
             <Save onClose={handleCloseSave}/>
-          </div>
-        )}
-        {soundsScreen && song.songStructure.length > 0 && (
-          <div className={styles.generateOverlay}>
-            <Sounds
-              input={paletteInput}
-              variant={soundVariant}
-              onVariant={setSoundVariant}
-              filename={exportName}
-              title={`Song in ${song.key}`}
-              onClose={handleCloseSounds}
-            />
           </div>
         )}
         {song.songStructure.length > 0 && <Piano ref={pianoRef} lampsRef={lampsRef} />}
@@ -880,7 +852,6 @@ function App() {
             <button onClick={handleMidi} className={styles.button}>
               {midi ? "Use Osc" : "Use Midi"}
             </button>
-            <button onClick={() => setSoundsScreen(true)} disabled={song.songStructure.length === 0} className={styles.button} title="Recommended Ableton Live 10 Suite instruments for this song's drums, bass and chords">Sounds</button>
             <button onClick={handleExport} className={styles.button} title="Download a multitrack .mid (drums, bass, chords, guide tones, section markers) for your DAW">Export MIDI</button>
             <button onClick={handleSaveClick} className={styles.button}>Save/Load</button>
             <button onClick={logout} className={styles.button}>Log Out</button>

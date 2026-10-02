@@ -15,8 +15,7 @@ import { PPQ, beatsToTickPositions } from './time';
 import { Key, Mode, keySignature, MODES, MODE_NAMES } from './theory';
 import { MidiEvent, MidiTrack, keySignatureEvent, marker, note, programChange, tempo, textEvent, timeSignature, trackName, writeMidiFile } from './midiFile';
 
-// General MIDI drum notes, in the drum machine's row order (doc.ts DRUM_VOICES).
-export const GM_DRUMS = [36, 38, 45, 47, 50, 42, 46, 51, 49];
+const GM_DRUMS = [36, 38, 45, 47, 50, 42, 46, 51, 49];
 const DRUM_CHANNEL = 9;
 const BASS_CHANNEL = 0;
 const CHORD_CHANNEL = 1;
