@@ -9,11 +9,17 @@
 //   4 Guide tones (3rds/7ths), when the song has them
 // Section markers show up on the arrangement timeline in Logic, Cubase,
 // Reaper and others, so the block structure survives the trip.
+//
+// With a sound palette (timbre.ts), the drum, bass and chord tracks are named
+// after their suggested Live 10 Suite instruments, open with a text note on
+// where to find them, and carry the palette's General MIDI fallbacks as
+// program changes (which Live ignores, but other DAWs and GM synths use).
 
 import { Part } from '../types';
 import { PPQ, beatsToTickPositions } from './time';
 import { Key, Mode, keySignature, MODES, MODE_NAMES } from './theory';
 import { MidiEvent, MidiTrack, keySignatureEvent, marker, note, programChange, tempo, textEvent, timeSignature, trackName, writeMidiFile } from './midiFile';
+import { Palette, RolePick, trackLabel } from './timbre';
 
 const GM_DRUMS = [36, 38, 45, 47, 50, 42, 46, 51, 49];
 const DRUM_CHANNEL = 9;
@@ -38,18 +44,31 @@ export interface ExportInput {
   bpm: number;
   key: string;
   title?: string;
+  palette?: Palette | null;
 }
 
-export function songToMidi({ songStructure, bpm, key, title }: ExportInput): Uint8Array {
+// Track header for a palette pick: its name, a program change, and a note
+// on where the sound lives in Live's browser.
+function pickHeader(pick: RolePick, channel: number): MidiEvent[] {
+  const tb = pick.timbre;
+  return [
+    trackName(trackLabel(pick)),
+    programChange(0, channel, tb.gm),
+    textEvent(0, `Live 10 Suite: ${tb.device} - ${tb.browse.replace(/›/g, '>')}, search "${tb.search[0]}"`),
+  ];
+}
+
+export function songToMidi({ songStructure, bpm, key, title, palette }: ExportInput): Uint8Array {
   const conductor: MidiEvent[] = [trackName(title ?? `Song in ${key}`), tempo(0, bpm), timeSignature(0, 4, 4)];
+  if (palette) conductor.push(textEvent(0, `Sound palette: ${palette.style.name}`));
   const parsedKey = parseKeyString(key);
   if (parsedKey) {
     const sf = keySignature(parsedKey);
     conductor.push(keySignatureEvent(0, sf, parsedKey.mode === 'minor'));
   }
-  const drums: MidiEvent[] = [trackName('Drums')];
-  const bass: MidiEvent[] = [trackName('Bass'), programChange(0, BASS_CHANNEL, 33)];
-  const chords: MidiEvent[] = [trackName('Chords'), programChange(0, CHORD_CHANNEL, 0)];
+  const drums: MidiEvent[] = palette ? pickHeader(palette.drums, DRUM_CHANNEL) : [trackName('Drums')];
+  const bass: MidiEvent[] = palette ? pickHeader(palette.bass, BASS_CHANNEL) : [trackName('Bass'), programChange(0, BASS_CHANNEL, 33)];
+  const chords: MidiEvent[] = palette ? pickHeader(palette.chords, CHORD_CHANNEL) : [trackName('Chords'), programChange(0, CHORD_CHANNEL, 0)];
   const guide: MidiEvent[] = [trackName('Guide Tones'), programChange(0, GUIDE_CHANNEL, 73)];
 
   let partStart = 0;
