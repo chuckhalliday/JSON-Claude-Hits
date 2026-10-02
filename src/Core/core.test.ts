@@ -4,12 +4,12 @@ import { editBass, editChordTone, editDrum } from './edits';
 import { FORM_TEMPLATES, formTemplate, resolveOrder } from './form';
 import { keyName, keyScale, spelledName, spellPc, spellInChord, chordSymbol, chordTones, chordBassPc, MODES, Mode, romanNumeral, BASS_MIN, BASS_MAX, VOICING_MIN, VOICING_MAX, ChordEvent } from './theory';
 import { normalizeMotif } from './rhythm';
-import { songToMidi, parseKeyString } from './exportMidi';
+import { songToMidi, parseKeyString, metricLevel, velocity, BASS_VELOCITY, DRUM_VELOCITY, GM_DRUMS } from './exportMidi';
 import { readMidiFile } from './midiFile';
 import { stepsToLegacyBeats, beatsToTickPositions, PPQ, BAR } from './time';
 import { bassPitch } from '../SongStructure/bassPitch';
 import { createRandomSong } from '../SongStructure/createSong';
-import { SongDoc, CRASH } from './doc';
+import { SongDoc, CRASH, SNARE } from './doc';
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
@@ -371,6 +371,49 @@ describe('MIDI export', () => {
     const totalBeats = sum(parts.map(p => sum(p.drumGroove)));
     expect(markers.length).toBe(parts.length + 1);
     expect(conductor[conductor.length - 1].tick).toBe(Math.round(totalBeats * PPQ));
+  });
+
+  it('shapes velocities by the beat and by each part\'s energy', () => {
+    expect([0, PPQ, PPQ / 2, PPQ / 4, PPQ / 3, 2 * BAR, BAR + 3 * PPQ].map(metricLevel)).toEqual([0, 1, 2, 3, 3, 0, 1]);
+    expect(velocity(BASS_VELOCITY, 0)).toBe(BASS_VELOCITY[0]);
+    expect(velocity(BASS_VELOCITY, 0, 1)).toBeGreaterThan(velocity(BASS_VELOCITY, 0, 0));
+    expect(velocity(DRUM_VELOCITY[CRASH], 0, 1, true)).toBeLessThanOrEqual(127);
+
+    const doc = generateDoc({ seed: 8, formId: 'build-drop' });
+    const parts = realizeSong(doc);
+    const file = readMidiFile(songToMidi({ songStructure: parts, bpm: 124, key: keyName(doc.key) }));
+    const ons = (t: number) => file.tracks[t].filter(e => (e.status & 0xf0) === 0x90);
+    const starts = parts.map((_, i) => Math.round(sum(parts.slice(0, i).map(p => sum(p.drumGroove))) * PPQ));
+    const partAt = (tick: number) => starts.filter(s => s <= tick).length - 1;
+    const levelOf = (tick: number) => metricLevel(tick - starts[partAt(tick)]);
+
+    for (const t of [1, 2, 3, 4]) {
+      ons(t).forEach(e => { expect(e.data[1]).toBeGreaterThanOrEqual(1); expect(e.data[1]).toBeLessThanOrEqual(127); });
+      expect(new Set(ons(t).map(e => e.data[1])).size).toBeGreaterThan(1);
+    }
+
+    // Within a part, bass notes on the downbeat play louder than sixteenths.
+    const bass = ons(2);
+    const part = parts.findIndex((_, i) => bass.some(e => partAt(e.tick) === i && levelOf(e.tick) === 0) && bass.some(e => partAt(e.tick) === i && levelOf(e.tick) === 3));
+    expect(part).toBeGreaterThanOrEqual(0);
+    const inPart = bass.filter(e => partAt(e.tick) === part);
+    expect(Math.min(...inPart.filter(e => levelOf(e.tick) === 0).map(e => e.data[1])))
+      .toBeGreaterThan(Math.max(...inPart.filter(e => levelOf(e.tick) === 3).map(e => e.data[1])));
+
+    // The loudest part's opening chord is louder than the quietest part's.
+    const energies = parts.map(p => p.energy!);
+    const firstChord = (i: number) => ons(3).find(e => e.tick === starts[i])!.data[1];
+    const loud = energies.indexOf(Math.max(...energies));
+    const quiet = energies.indexOf(Math.min(...energies));
+    expect(energies[loud] - energies[quiet]).toBeGreaterThan(0.3);
+    expect(firstChord(loud)).toBeGreaterThan(firstChord(quiet));
+
+    // Snare backbeats sound over the ghost notes between them.
+    const snares = ons(1).filter(e => e.data[0] === GM_DRUMS[SNARE]);
+    const backbeats = snares.filter(e => levelOf(e.tick) <= 1).map(e => e.data[1]);
+    const ghosts = snares.filter(e => levelOf(e.tick) === 3).map(e => e.data[1]);
+    expect(backbeats.length).toBeGreaterThan(0);
+    if (ghosts.length) expect(Math.min(...backbeats)).toBeGreaterThan(Math.max(...ghosts));
   });
 
   it('exports classic (legacy-engine) songs too', () => {
