@@ -1,13 +1,12 @@
 import { generateDoc } from './generate';
 import { realizeSong } from './realize';
 import { keyName } from './theory';
-import { songToMidi } from './exportMidi';
-import { readMidiFile } from './midiFile';
+import { GM_DRUMS } from './exportMidi';
 import { createRandomSong } from '../SongStructure/createSong';
 import { genrePresets } from '../SongStructure/tuning';
 import { Part } from '../types';
 import { GenerateOptions } from './doc';
-import { LIVE10_SUITE_DEVICES, STYLES, PaletteInput, StyleId, liveNoteName, paletteText, songFeatures, suggestPalette, trackLabel } from './timbre';
+import { LIVE10_SUITE_DEVICES, STYLES, PaletteInput, StyleId, liveNoteName, paletteText, songFeatures, suggestPalette } from './timbre';
 
 const inputFor = (options: GenerateOptions): PaletteInput => {
   const doc = generateDoc(options);
@@ -29,15 +28,13 @@ const withParts = (input: PaletteInput, change: (p: Part) => Part): PaletteInput
   ({ ...input, songStructure: input.songStructure.map(change) });
 
 describe('sound palette table', () => {
-  it('only suggests Live 10 Suite instruments and presets, never Clips or Samples', () => {
+  it('recommends Live 10 Suite instruments with a reason and a starting patch, never loops or clips', () => {
     for (const style of STYLES) {
       for (const tb of [...style.drums, ...style.bass, ...style.chords]) {
         expect(LIVE10_SUITE_DEVICES).toContain(tb.device);
-        expect(tb.browse).toMatch(/^(Sounds|Drums|Instruments)\b/);
-        expect(tb.browse).not.toMatch(/Clips|Samples/);
-        expect(tb.search.length).toBeGreaterThan(0);
-        expect(tb.gm).toBeGreaterThanOrEqual(0);
-        expect(tb.gm).toBeLessThanOrEqual(127);
+        expect(tb.basis.length).toBeGreaterThan(0);
+        expect(tb.setup.length).toBeGreaterThan(0);
+        expect([tb.basis, ...tb.setup].join(' ')).not.toMatch(/\b(loops?|clips?)\b/i);
         expect(tb.brightness).toBeGreaterThanOrEqual(0);
         expect(tb.brightness).toBeLessThanOrEqual(1);
         expect(tb.weight).toBeGreaterThanOrEqual(0);
@@ -124,30 +121,16 @@ describe('suggestPalette', () => {
     const text = paletteText(palette, 'Song in E Minor');
     for (const pick of [palette.drums, palette.bass, palette.chords]) expect(text).toContain(pick.timbre.name);
     expect(text).toContain('HOW THEY FIT TOGETHER');
-    expect(text).toContain('Clips or Samples');
+    expect(text).toContain(palette.drums.timbre.basis);
+    palette.chords.timbre.setup.forEach(step => expect(text).toContain(step));
+    expect(text).toContain(palette.drumMap);
   });
 });
 
-describe('MIDI export with a palette', () => {
-  it('names tracks after the suggested sounds and keeps every note', () => {
-    const input = inputFor({ seed: 8, formId: 'pop', tonic: 4, mode: 'minor', bpm: 96 });
-    const palette = suggestPalette(input);
-    const plain = readMidiFile(songToMidi({ songStructure: input.songStructure, bpm: 96, key: input.key }));
-    const named = readMidiFile(songToMidi({ songStructure: input.songStructure, bpm: 96, key: input.key, palette }));
-
-    const nameOf = (track: number, file = named) => file.tracks[track].find(e => e.metaType === 0x03)!.text;
-    expect(nameOf(1)).toBe(trackLabel(palette.drums));
-    expect(nameOf(2)).toBe(trackLabel(palette.bass));
-    expect(nameOf(3)).toBe(trackLabel(palette.chords));
-    expect([1, 2, 3].map(t => nameOf(t, plain))).toEqual(['Drums', 'Bass', 'Chords']);
-    [1, 2, 3].forEach(t => expect(nameOf(t)).toMatch(/^[\x20-\x7e]+$/));
-
-    const program = (track: number) => named.tracks[track].find(e => (e.status & 0xf0) === 0xc0)!;
-    expect(program(1)).toMatchObject({ status: 0xc9, data: [palette.drums.timbre.gm] });
-    expect(program(2)).toMatchObject({ status: 0xc0, data: [palette.bass.timbre.gm] });
-    expect(program(3)).toMatchObject({ status: 0xc1, data: [palette.chords.timbre.gm] });
-
-    const noteOns = (file: typeof named, t: number) => file.tracks[t].filter(e => (e.status & 0xf0) === 0x90).map(e => [e.tick, ...e.data]);
-    for (const t of [1, 2, 3, 4]) expect(noteOns(named, t)).toEqual(noteOns(plain, t));
+describe('drum pads', () => {
+  it('lists every drum voice the .mid plays, all on a Drum Rack\'s default 16 pads (C1-D#2)', () => {
+    const { drumMap } = suggestPalette(inputFor({ seed: 1 }));
+    expect(GM_DRUMS.every(n => n >= 36 && n <= 51)).toBe(true);
+    expect(drumMap).toBe('kick C1, snare D1, closed hat F#1, low tom A1, open hat A#1, mid tom B1, crash C#2, high tom D2, ride D#2');
   });
 });

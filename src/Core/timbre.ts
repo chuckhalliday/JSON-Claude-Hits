@@ -6,39 +6,35 @@
 // bass and chords meet in pitch - matched against the fixed table of Live's
 // own instruments below. Nothing here looks at reference tracks or names an
 // artist, and nothing writes to the song: the notes stay exactly as the
-// generators (or your edits) left them. The table points at instruments and
-// presets only, never Live's Clips or Samples, whose loops carry someone
-// else's playing.
+// generators (or your edits) left them. The table recommends instruments and
+// how to patch them, never loops or clips, which carry someone else's playing.
 //
-// Live ignores MIDI program changes for its own devices, so a palette travels
-// as text: the Sounds panel, its sound sheet, and the exported .mid's track
-// names. Each timbre also carries a General MIDI program as a fallback for
-// other DAWs and GM synths.
+// The palette is advice for after the fact: the exported .mid stays a plain
+// MIDI file, and the instruments are set up in Live once it's loaded.
 
 import { Part, StoredTuning } from '../types';
-import { SongDoc, KICK, SNARE, HAT_C, HAT_O, RIDE } from './doc';
+import { SongDoc, KICK, SNARE, HAT_C, HAT_O, RIDE, DRUM_VOICES } from './doc';
 import { Mode, MODE_NAMES } from './theory';
 import { beatsToTickPositions } from './time';
+import { GM_DRUMS } from './exportMidi';
 import { genrePresets, normalizeTuning } from '../SongStructure/tuning';
 
 export type Role = 'drums' | 'bass' | 'chords';
 
-// Every instrument Live 10 Suite ships with that the table uses.
+// The Live 10 Suite instruments the table recommends.
 export const LIVE10_SUITE_DEVICES = [
-  'Drum Rack', 'Simpler', 'Sampler', 'Operator', 'Analog', 'Wavetable', 'Electric', 'Tension', 'Collision',
+  'Drum Rack', 'Sampler', 'Operator', 'Analog', 'Wavetable', 'Electric', 'Tension', 'Collision',
 ] as const;
 export type Device = typeof LIVE10_SUITE_DEVICES[number];
 
 export interface Timbre {
   name: string;
   device: Device;
-  browse: string; // where to look in Live's browser
-  search: string[]; // words to type into the browser's search field
-  gm: number; // General MIDI program; for drums, the GM2 kit number
+  basis: string; // what the device does that suits this sound
+  setup: string[]; // a starting patch, from the device's default state
   attack: 'percussive' | 'plucked' | 'sustained';
   brightness: number; // 0 dark .. 1 bright
   weight: number; // 0 thin .. 1 heavy low end
-  tips: string[]; // device settings worth a look
 }
 
 export type StyleId = 'band' | 'soul' | 'blues' | 'synthpop' | 'club' | 'downtempo';
@@ -78,6 +74,7 @@ export interface Palette {
   bass: RolePick;
   chords: RolePick;
   interplay: string[];
+  drumMap: string; // which pad each drum voice in the .mid plays
   variant: number; // which combination this is, best first
   variants: number;
 }
@@ -92,69 +89,174 @@ export interface PaletteInput {
 }
 
 // ---- The instrument table (Live 10 Suite) --------------------------------
+//
+// Each entry names the Live 10 Suite device to play the part on, why that
+// device's design suits the sound (its `basis`), and a starting patch built
+// from the device's own sections and controls. Preset names vary with the
+// installed Packs, so none are relied on: every patch can be set up from the
+// device's default state. The scoring fields describe the patch as set up.
 
-const t = (name: string, device: Device, browse: string, search: string[], gm: number, attack: Timbre['attack'], brightness: number, weight: number, tips: string[] = []): Timbre =>
-  ({ name, device, browse, search, gm, attack, brightness, weight, tips });
+const t = (name: string, device: Device, basis: string, setup: string[], attack: Timbre['attack'], brightness: number, weight: number): Timbre =>
+  ({ name, device, basis, setup, attack, brightness, weight });
+
+const SAMPLED_KIT = 'Acoustic drums are recorded sounds that don\'t synthesise convincingly; a Drum Rack holds one sampled hit per pad, each on its own chain for EQ and compression.';
+const SYNTH_KIT = 'Machine-style drums are themselves synthesised. Live 10 Suite\'s Drum Synth devices (DS Kick, DS Snare, DS HH, DS Cymbal, DS Tom) each build one voice from a few controls such as pitch, decay and tone, and sit on Drum Rack pads like samples do.';
 
 // Drums
-const STUDIO_KIT = t('Tight studio kit', 'Drum Rack', 'Drums', ['studio kit', 'acoustic kit'], 0, 'percussive', 0.5, 0.6,
-  ['Drum Buss on the rack: a little Drive and Boom for body']);
-const ROOM_KIT = t('Big room kit', 'Drum Rack', 'Drums', ['room kit', 'rock kit'], 8, 'percussive', 0.7, 0.8,
-  ['Glue Compressor on the rack, slow attack, for room-sized punch']);
-const BRUSH_KIT = t('Brushed jazz kit', 'Drum Rack', 'Drums', ['brush', 'jazz kit'], 40, 'percussive', 0.35, 0.4,
-  ['Velocity MIDI effect with a little Random keeps brushes from sounding mechanical']);
-const VINTAGE_KIT = t('Dry vintage kit', 'Drum Rack', 'Drums', ['vintage kit', 'jazz kit'], 32, 'percussive', 0.5, 0.5,
-  ['Keep it dry: short Reverb send only on the snare']);
-const MACHINE_808 = t('808-style machine kit', 'Drum Rack', 'Drums', ['808'], 25, 'percussive', 0.45, 0.9,
-  ['Tune the kick pad to the song\'s tonic (Transpose in its Simpler)']);
-const MACHINE_909 = t('909-style machine kit', 'Drum Rack', 'Drums', ['909'], 24, 'percussive', 0.8, 0.75,
-  ['Shorten the open hat\'s Decay so it chokes against the closed hat']);
-const DUSTY_KIT = t('Soft dusty kit', 'Drum Rack', 'Drums', ['vintage kit', 'lo-fi', 'kit'], 0, 'percussive', 0.3, 0.6,
-  ['Vinyl Distortion or Redux on the rack for dust, then EQ Eight to roll off the top']);
+const STUDIO_KIT = t('Tight studio kit', 'Drum Rack', SAMPLED_KIT, [
+  'Load close-miked acoustic kick, snare, hat, tom, ride and crash samples from Live\'s library onto the pads',
+  'Put the open and closed hat in the same Choke group so the open hat cuts off',
+  'Drum Buss on the rack: a little Drive and Boom for body',
+], 'percussive', 0.5, 0.6);
+const ROOM_KIT = t('Big room kit', 'Drum Rack', SAMPLED_KIT, [
+  'Load acoustic samples with room sound in them (or add a short Reverb on a Rack return)',
+  'Glue Compressor on the rack, slow attack, for room-sized punch',
+  'Open and closed hat in one Choke group',
+], 'percussive', 0.7, 0.8);
+const BRUSH_KIT = t('Brushed jazz kit', 'Drum Rack', SAMPLED_KIT, [
+  'Load brushed snare and soft kick samples; use a ride for the time',
+  'Velocity MIDI effect in front of the rack with a little Random keeps brushes from sounding mechanical',
+  'Keep the rack dry; a small Reverb send on the snare only',
+], 'percussive', 0.35, 0.4);
+const VINTAGE_KIT = t('Dry vintage kit', 'Drum Rack', SAMPLED_KIT, [
+  'Load dry acoustic samples (no room); tune the snare pad down a little in its Simpler',
+  'Open and closed hat in one Choke group',
+  'A short Reverb send on the snare only',
+], 'percussive', 0.5, 0.5);
+const MACHINE_808 = t('808-style machine kit', 'Drum Rack', SYNTH_KIT, [
+  'DS Kick with a long Decay for a booming kick; tune its Pitch to the song\'s tonic',
+  'DS Snare and DS HH with short decays; DS Cymbal for the crash and ride pads',
+  'Closed and open DS HH pads in one Choke group',
+], 'percussive', 0.45, 0.9);
+const MACHINE_909 = t('909-style machine kit', 'Drum Rack', SYNTH_KIT, [
+  'DS Kick with a short Decay and more attack click for punch',
+  'DS Snare with plenty of noise (Tone up); DS HH with a bright tone',
+  'Shorten the open hat\'s decay and choke it against the closed hat',
+], 'percussive', 0.8, 0.75);
+const DUSTY_KIT = t('Soft dusty kit', 'Drum Rack', SAMPLED_KIT, [
+  'Load soft acoustic samples; lower each pad\'s velocity sensitivity so hits stay gentle',
+  'Vinyl Distortion or Redux on the rack for dust, then EQ Eight to roll off the top',
+], 'percussive', 0.3, 0.6);
 
 // Bass
-const FINGER_BASS = t('Finger electric bass', 'Sampler', 'Sounds › Bass', ['finger bass', 'electric bass'], 33, 'plucked', 0.4, 0.7,
-  ['Compressor with a fast attack evens out the line']);
-const PICK_BASS = t('Picked electric bass', 'Sampler', 'Sounds › Bass', ['pick bass', 'electric bass'], 34, 'plucked', 0.7, 0.6,
-  ['Saturator (Soft Sine) adds growl that cuts through busy drums']);
-const UPRIGHT_BASS = t('Upright bass', 'Sampler', 'Sounds › Bass', ['upright', 'acoustic bass'], 32, 'plucked', 0.3, 0.7,
-  ['Shorten the Release a touch so walking notes don\'t blur']);
-const ROUND_BASS = t('Round synth bass', 'Operator', 'Instruments › Operator', ['bass', 'round'], 38, 'plucked', 0.3, 0.8,
-  ['Lower the filter Freq until it sounds round, then add a little Envelope amount']);
-const ANALOG_BASS = t('Analog saw bass', 'Analog', 'Instruments › Analog', ['bass', 'saw'], 38, 'plucked', 0.6, 0.8,
-  ['Short filter envelope decay gives each note a pluck']);
-const OCTAVE_BASS = t('Bright pluck bass', 'Wavetable', 'Instruments › Wavetable', ['pluck bass', 'bass'], 39, 'plucked', 0.75, 0.6,
-  ['Keep Unison off below C1 so the low notes stay solid']);
-const SUB_BASS = t('Sine sub bass', 'Operator', 'Instruments › Operator', ['sub', 'sine'], 38, 'sustained', 0.1, 1,
-  ['Play it mono and keep it clean: Utility with Bass Mono, no reverb']);
-const REESE_BASS = t('Detuned (reese) bass', 'Wavetable', 'Instruments › Wavetable', ['reese', 'detuned bass'], 39, 'sustained', 0.6, 0.9,
-  ['Automate the filter for movement; keep a sub layer underneath']);
+const FINGER_BASS = t('Fingered electric bass', 'Tension',
+  'Tension physically models a string: an excitator (bow, hammer or plectrum) sets it moving, and a damper, pickup and body shape the sound, so a bass guitar can be built without samples.', [
+  'Excitator: Plectrum with a soft, low setting for a fingered attack',
+  'Pickup: on, placed toward the middle of the string for a round tone; Body: off',
+  'Shorten the string Decay so notes stop like a muted bass; Compressor with a fast attack evens the line',
+], 'plucked', 0.4, 0.7);
+const PICK_BASS = t('Picked electric bass', 'Tension',
+  'Tension physically models a string excited by a plectrum and read by an electric pickup, which is how a picked bass gets its bite.', [
+  'Excitator: Plectrum with a harder setting for a pick attack',
+  'Pickup: on, close to the bridge end for a brighter, punchier tone; Body: off',
+  'Saturator (Soft Sine) after it adds growl that cuts through busy drums',
+], 'plucked', 0.7, 0.6);
+const UPRIGHT_BASS = t('Upright bass', 'Tension',
+  'Tension models a plucked string resonating in an acoustic body, the two things that make an upright bass sound woody.', [
+  'Excitator: Plectrum, soft; Pickup: off',
+  'Body: on, at a large size, so the string resonates through it',
+  'Lengthen the string Decay a little for walking lines, but keep the Release short so notes don\'t blur',
+], 'plucked', 0.3, 0.7);
+const ROUND_BASS = t('Round FM bass', 'Operator',
+  'Operator is a four-oscillator FM synth: one sine oscillator modulating another adds harmonics that can fade with an envelope, giving a plucked tone with a clean sine body.', [
+  'An algorithm with Oscillator B modulating Oscillator A; both sine, Coarse 1',
+  'Give B a fast-decaying envelope and modest Level so only the attack is bright',
+  'Filter low-pass with the cutoff low; mono, short Release',
+], 'plucked', 0.3, 0.8);
+const ANALOG_BASS = t('Analog saw bass', 'Analog',
+  'Analog models a subtractive synth: two oscillators into two multimode filters, which is the classic recipe for a saw bass with a filter pluck.', [
+  'Osc 1 Saw; Osc 2 Rect (square) one octave down for weight',
+  'Filter 1 low-pass at 24 dB with moderate Reso; a short filter envelope decay gives each note a pluck',
+  'Mono with a little Glide if the line moves in steps',
+], 'plucked', 0.6, 0.8);
+const OCTAVE_BASS = t('Bright pluck bass', 'Wavetable',
+  'Wavetable plays two wavetable oscillators plus a sub oscillator, so a bright plucked top and a clean low end come from one device.', [
+  'Osc 1 on a bright, saw-like table; Sub oscillator on for the fundamental',
+  'Filter 1 low-pass with Envelope 2 on its frequency: fast attack, short decay, low sustain',
+  'Keep Unison off so octave jumps stay solid in the low register',
+], 'plucked', 0.75, 0.6);
+const SUB_BASS = t('Sine sub bass', 'Operator',
+  'A single sine oscillator has no harmonics above its fundamental, which is exactly a sub bass: weight the kick can sit beside without the two blurring.', [
+  'Oscillator A only (sine, Coarse 1); turn Oscillators B to D off',
+  'Amp envelope: instant attack, full sustain, short release; one voice (mono)',
+  'Utility with Bass Mono after it; no reverb on this track',
+], 'sustained', 0.1, 1);
+const REESE_BASS = t('Detuned (reese) bass', 'Wavetable',
+  'Two saw-like wavetable oscillators detuned against each other beat slowly, the moving low end of a reese bass; Wavetable\'s sub oscillator keeps the fundamental steady underneath.', [
+  'Osc 1 and Osc 2 on saw-like tables, Osc 2 detuned a few cents (or Unison: Classic at a low amount)',
+  'Sub oscillator on; Filter 1 low-pass around 1 kHz',
+  'An LFO on the filter frequency, slow, for movement',
+], 'sustained', 0.6, 0.9);
 
 // Chords
-const GRAND_PIANO = t('Grand piano', 'Sampler', 'Sounds › Piano & Keys', ['grand piano'], 0, 'percussive', 0.6, 0.7,
-  ['EQ Eight: gently dip the low mids so it doesn\'t crowd the bass']);
-const ORGAN = t('Drawbar-style organ', 'Operator', 'Sounds › Piano & Keys', ['organ'], 16, 'sustained', 0.5, 0.5,
-  ['Auto Pan at a slow rate stands in for a rotating speaker', 'No organ preset to hand? Operator with sine oscillators at coarse ratios 1, 2, 3 and 4 makes a drawbar organ']);
-const PLUCKED_STRING = t('Plucked string', 'Tension', 'Instruments › Tension', ['guitar', 'pluck'], 27, 'plucked', 0.6, 0.4,
-  ['Pull Damping up a little for a muted, rhythmic chop']);
-const TINE_EP = t('Tine electric piano', 'Electric', 'Instruments › Electric', ['electric piano'], 4, 'percussive', 0.45, 0.5,
-  ['Chorus at a low rate and a touch of Auto Pan for shimmer']);
-const VIBES = t('Mallet vibes', 'Collision', 'Instruments › Collision', ['vibraphone', 'mallet'], 11, 'percussive', 0.55, 0.3,
-  ['Lengthen the Decay for ringing chords; shorten it for comping']);
-const BARRELHOUSE = t('Bright upright piano', 'Sampler', 'Sounds › Piano & Keys', ['upright piano', 'piano'], 3, 'percussive', 0.65, 0.6,
-  ['A little Saturator gives it a barroom edge']);
-const POLY_SYNTH = t('Analog poly synth', 'Analog', 'Instruments › Analog', ['poly', 'keys'], 90, 'plucked', 0.65, 0.5,
-  ['Detune Osc 2 a few cents against Osc 1 to widen it']);
-const SYNTH_PLUCK = t('Synth pluck', 'Wavetable', 'Instruments › Wavetable', ['pluck'], 90, 'plucked', 0.75, 0.35,
-  ['Echo or Simple Delay at 1/8 dotted fills the space between chords']);
-const SOFT_PAD = t('Soft analog pad', 'Analog', 'Instruments › Analog', ['pad', 'warm'], 89, 'sustained', 0.4, 0.6,
-  ['Raise the Attack so the pad swells in under the drums']);
-const STAB = t('Synth stab', 'Wavetable', 'Instruments › Wavetable', ['stab', 'chord'], 90, 'percussive', 0.75, 0.4,
-  ['Short amp Release; let a Reverb send carry the tail']);
-const WIDE_PAD = t('Wide wavetable pad', 'Wavetable', 'Instruments › Wavetable', ['pad'], 89, 'sustained', 0.5, 0.5,
-  ['Utility Width up for size, but check it in mono']);
-const FELT_KEYS = t('Soft felt piano', 'Sampler', 'Sounds › Piano & Keys', ['soft piano', 'felt'], 0, 'percussive', 0.3, 0.5,
-  ['EQ Eight high shelf down a few dB for a muffled, close sound']);
+const GRAND_PIANO = t('Grand piano', 'Sampler',
+  'A piano\'s tone changes too much across the keyboard and with how hard it\'s struck to synthesise well; Sampler maps a multisampled piano across key zones and velocity layers.', [
+  'Load a multisampled grand piano, with velocity layers, into Sampler',
+  'EQ Eight: dip the low mids a little so it doesn\'t crowd the bass',
+], 'percussive', 0.6, 0.7);
+const ORGAN = t('Drawbar-style organ', 'Operator',
+  'A drawbar organ adds sine waves at fixed pitch ratios; Operator\'s algorithm with all four oscillators as carriers does the same additive mix.', [
+  'The algorithm with all four oscillators side by side (all carriers), all sine',
+  'Coarse ratios 0.5, 1, 1.5 and 2 (the 16\', 8\', 5 1/3\' and 4\' drawbars); set each Level like a drawbar',
+  'Amp envelopes: instant attack, full sustain; Auto Pan at a slow rate for a rotating-speaker feel',
+], 'sustained', 0.5, 0.5);
+const PLUCKED_STRING = t('Plucked guitar-like string', 'Tension',
+  'Tension models a plucked string in a resonant body, so chords come out as strummed or picked strings with a natural decay.', [
+  'Excitator: Plectrum; Body: on at a medium size',
+  'Raise Damping a little for a muted, rhythmic chop, or lower it for ringing chords',
+], 'plucked', 0.6, 0.4);
+const TINE_EP = t('Tine electric piano', 'Electric',
+  'Electric physically models an electric piano: a mallet strikes a tine fork, and a damper and electromagnetic pickup shape the tone.', [
+  'Pickup Type R (the tine-style electromagnetic pickup)',
+  'Mallet Stiffness moderate; lower Force for a mellow tone, raise it for bark',
+  'Chorus at a low rate and a touch of Auto Pan for shimmer',
+], 'percussive', 0.45, 0.5);
+const GRITTY_EP = t('Reed electric piano', 'Electric',
+  'Electric\'s W pickup models a reed-style electrostatic pickup, which gives the gritty, bluesy electric piano tone that breaks up when played hard.', [
+  'Pickup Type W',
+  'Mallet Force up so harder notes bark; a little Saturator for edge',
+], 'percussive', 0.65, 0.55);
+const VIBES = t('Mallet vibes', 'Collision',
+  'Collision models mallet percussion: a mallet excites resonators shaped like beams, marimba bars, plates or tubes, which is how a vibraphone makes its tone.', [
+  'Mallet excitator; Resonator 1 type Beam or Marimba',
+  'An LFO on volume at a few Hz for vibraphone-style tremolo',
+  'Lengthen the resonator decay for ringing chords; shorten it for comping',
+], 'percussive', 0.55, 0.3);
+const POLY_SYNTH = t('Analog poly synth', 'Analog',
+  'Analog\'s two oscillators, detuned against each other into a low-pass filter, give the warm, wide chord sound of a classic polysynth.', [
+  'Osc 1 and Osc 2 Saw, Osc 2 detuned a few cents',
+  'Filter 1 low-pass at 12 dB, cutoff mid-way, a little filter envelope',
+  'Amp: quick attack, medium decay, high sustain',
+], 'plucked', 0.65, 0.5);
+const SYNTH_PLUCK = t('Synth pluck', 'Wavetable',
+  'Wavetable\'s filter driven by a fast envelope turns any bright table into a short pluck, so chords become rhythmic hits.', [
+  'Osc 1 on a bright table; Amp envelope: no sustain, short decay',
+  'Filter 1 low-pass with Envelope 2 on its frequency, fast decay',
+  'Echo or Simple Delay at a dotted 1/8 fills the space between chords',
+], 'plucked', 0.75, 0.35);
+const SOFT_PAD = t('Soft analog pad', 'Analog',
+  'Analog\'s slow amp attack and LFO-swept filter make a pad that swells in under the other parts without competing with their rhythm.', [
+  'Osc 1 Saw and Osc 2 Rect, slightly detuned',
+  'Filter 1 low-pass, cutoff low; LFO 1 slowly on the cutoff',
+  'Amp: slow attack, long release',
+], 'sustained', 0.4, 0.6);
+const STAB = t('Synth stab', 'Wavetable',
+  'Short envelopes on Wavetable\'s unison-thickened oscillators give a punchy chord stab that leaves the gaps to the bass and drums.', [
+  'Osc 1 on a saw-like table; Unison: Classic, moderate amount',
+  'Amp envelope: fast attack, short decay, no sustain, short release',
+  'Let a Reverb send carry the tail instead of the release',
+], 'percussive', 0.75, 0.4);
+const WIDE_PAD = t('Wide wavetable pad', 'Wavetable',
+  'Slowly sweeping Wavetable\'s table Position with an LFO, with the Shimmer unison mode, makes a pad that keeps moving while the chords hold.', [
+  'Osc 1 and Osc 2 on soft tables; an LFO slowly on Osc 1 Position',
+  'Unison: Shimmer; Amp: slow attack, long release',
+  'Utility Width up for size, but check it in mono',
+], 'sustained', 0.5, 0.5);
+const SOFT_KEYS = t('Soft felt keys', 'Electric',
+  'Lowering Electric\'s mallet stiffness and force models a soft, felt-like strike, giving a muted, close keys sound.', [
+  'Mallet Stiffness and Force low; Pickup Type R',
+  'EQ Eight: a high shelf down a few dB for a muffled tone',
+], 'percussive', 0.3, 0.5);
 
 interface Style {
   id: StyleId;
@@ -198,7 +300,7 @@ export const STYLES: Style[] = [
     fit: f => (f.formId === 'blues' ? 3 : 0) + (f.genre === 'Blues' ? 1.5 : 0) + 0.8 * swingAmount(f) + 0.3 * within(f.bpm, 70, 130, 25),
     drums: [VINTAGE_KIT, STUDIO_KIT],
     bass: [FINGER_BASS, UPRIGHT_BASS],
-    chords: [ORGAN, BARRELHOUSE, TINE_EP],
+    chords: [ORGAN, GRITTY_EP, TINE_EP],
   },
   {
     id: 'synthpop', name: 'Synth-pop',
@@ -221,7 +323,7 @@ export const STYLES: Style[] = [
     fit: f => 2 * within(f.bpm, 60, 95, 12) + 0.8 * halfTime(f) + 0.8 * f.chordColor + 0.4 * (1 - f.brightness) + 0.4 * (1 - busyness(f)),
     drums: [DUSTY_KIT, MACHINE_808],
     bass: [SUB_BASS, FINGER_BASS],
-    chords: [TINE_EP, FELT_KEYS, SOFT_PAD],
+    chords: [TINE_EP, SOFT_KEYS, SOFT_PAD],
   },
 ];
 
@@ -333,8 +435,8 @@ export function songFeatures(input: PaletteInput): SongFeatures {
 
 // ---- Choosing the trio ---------------------------------------------------
 
-// Note names as Live's piano roll shows them (middle C = C3).
-const NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+// Note names as Live's piano roll shows them: sharps, middle C = C3.
+const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const liveNoteName = (midi: number) => `${NAMES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 2}`;
 const hz = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -461,10 +563,18 @@ function interplayNotes(f: SongFeatures, drums: Timbre, bass: Timbre, chords: Ti
   else if (f.bpm < 90) notes.push(`At ${f.bpm} BPM there's room for longer releases and a bigger Reverb on the chords.`);
   if (f.swing > 0.05) notes.push('The groove has triplet steps: a Velocity MIDI effect with a little Random on Drums keeps the shuffle human.');
   if (f.loudest && f.quietest && f.loudest.energy - f.quietest.energy >= 0.3) {
-    notes.push(`Energy runs from the ${f.quietest.label} (quietest) to the ${f.loudest.label} (loudest): map the Chords filter to a Macro and automate it open for the loud sections.`);
+    notes.push(`Energy runs from the ${f.quietest.label} (quietest) to the ${f.loudest.label} (loudest): automate the chord instrument's filter cutoff to open up for the loud sections.`);
   }
   return notes;
 }
+
+// The exported .mid plays drums on General MIDI notes (exportMidi.ts), all
+// within C1-D#2: the 16 pads a Drum Rack shows by default.
+const DRUM_NAMES = ['kick', 'snare', 'low tom', 'mid tom', 'high tom', 'closed hat', 'open hat', 'ride', 'crash'];
+const DRUM_MAP = DRUM_VOICES.map((_, v) => v)
+  .sort((a, b) => GM_DRUMS[a] - GM_DRUMS[b])
+  .map(v => `${DRUM_NAMES[v]} ${liveNoteName(GM_DRUMS[v])}`)
+  .join(', ');
 
 // The palette for a song. `variant` steps through the alternatives (it
 // wraps), best first. Deterministic: the same song always gets the same
@@ -483,16 +593,13 @@ export function suggestPalette(input: PaletteInput, variant = 0): Palette {
     bass: { role: 'bass', timbre: bass, why: bassWhy(f, bass) },
     chords: { role: 'chords', timbre: chords, why: chordsWhy(f, chords) },
     interplay: interplayNotes(f, drums, bass, chords),
+    drumMap: DRUM_MAP,
     variant: index,
     variants: combos.length,
   };
 }
 
 export const ROLE_TITLES: Record<Role, string> = { drums: 'Drums', bass: 'Bass', chords: 'Chords' };
-
-// Short track name for the exported .mid: "Bass - Sine sub bass (Operator)".
-// Plain ASCII: not every DAW reads non-ASCII text in a MIDI file.
-export const trackLabel = (pick: RolePick) => `${ROLE_TITLES[pick.role]} - ${pick.timbre.name} (${pick.timbre.device})`;
 
 // The palette as plain text, for the sound sheet download.
 export function paletteText(palette: Palette, title: string): string {
@@ -506,14 +613,15 @@ export function paletteText(palette: Palette, title: string): string {
     const tb = pick.timbre;
     lines.push(`${ROLE_TITLES[pick.role].toUpperCase()}: ${tb.name}`);
     lines.push(`  Device: ${tb.device}`);
-    lines.push(`  Browser: ${tb.browse} — search: ${tb.search.map(s => `"${s}"`).join(' or ')}`);
-    pick.why.forEach(w => lines.push(`  · ${w}`));
-    tb.tips.forEach(tip => lines.push(`  Tip: ${tip}`));
+    lines.push(`  Why this device: ${tb.basis}`);
+    lines.push('  Why for this song:');
+    pick.why.forEach(w => lines.push(`    · ${w}`));
+    lines.push('  Starting patch:');
+    tb.setup.forEach((step, i) => lines.push(`    ${i + 1}. ${step}`));
+    if (pick.role === 'drums') lines.push(`  Pads: ${palette.drumMap}`);
     lines.push('');
   }
   lines.push('HOW THEY FIT TOGETHER');
   palette.interplay.forEach(n => lines.push(`  · ${n}`));
-  lines.push('');
-  lines.push('Instruments and presets only: nothing here uses Live\'s Clips or Samples loops.');
   return lines.join('\n');
 }
