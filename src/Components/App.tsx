@@ -6,7 +6,7 @@ import Sounds from './Sounds';
 import SectionPanel from './SectionPanel';
 import { SHORT_LABELS } from '../Core/form';
 import { downloadMidi } from '../Core/exportMidi';
-import { PaletteInput } from '../Core/timbre';
+import { PaletteInput, SoundPick } from '../Core/timbre';
 import { SectionLabel } from '../Core/doc';
 import DrumMachine from "./DrumMachine";
 import BassStaff from "./BassStaff";
@@ -15,7 +15,7 @@ import { useSelector, useDispatch } from "react-redux"
 import { playVerse } from '../Playback/playSong';
 import { getAudioContext } from '../Playback/audioContext';
 import { useLampStep } from '../Playback/useLampStep';
-import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setPartLinked, duplicatePart, deletePart, undo } from '../reducers';
+import { incrementByAmount, setIsPlaying, setMidi, setAcoustic, SongState, setCurrentBeat, newSong, reorderParts, loadSong, setLoopPick, toggleLoop, setPartLinked, duplicatePart, deletePart, setSounds, undo } from '../reducers';
 import { isDetached, linkedCount } from '../Core/generate';
 import { beatsInPart, clampRegion, containsPoint, describePoint, partWindow, stepBeat, sum, trackWindow } from '../Playback/loop';
 import type { AppDispatch } from '../store'
@@ -62,8 +62,6 @@ function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [saveScreen, setSaveScreen] = useState(false);
   const [soundsScreen, setSoundsScreen] = useState(false);
-  // Which suggested sound combination the Sounds panel shows (0 = best match).
-  const [soundVariant, setSoundVariant] = useState(0);
   const anyPartOpen = Object.values(openedParts).some(Boolean);
 
   // T1-T10 song-generation slots. Only the active tab's song lives in Redux;
@@ -587,8 +585,6 @@ function App() {
     dispatch(setAcoustic({ acoustic: !acoustic }));
   };
 
-  // A new song starts back on its best-matching sounds.
-  useEffect(() => setSoundVariant(0), [song.seed]);
   const paletteInput: PaletteInput = React.useMemo(() => ({
     songStructure: song.songStructure,
     bpm: song.bpm,
@@ -598,6 +594,8 @@ function App() {
   }), [song.songStructure, song.bpm, song.key, song.doc, song.params]);
   const exportName = `${song.key.replace(/\s+/g, '-')}-${song.bpm}bpm${song.seed != null ? `-${song.seed}` : ''}`;
   const handleCloseSounds = useCallback(() => setSoundsScreen(false), []);
+  // The chosen combination lives on the song, so it's saved with it.
+  const handleChooseSounds = useCallback((pick: SoundPick | null) => dispatch(setSounds(pick)), [dispatch]);
 
   // Download the song (with every edit) as a Standard MIDI File for a DAW.
   const handleExport = () => {
@@ -633,8 +631,8 @@ function App() {
           <div className={styles.generateOverlay}>
             <Sounds
               input={paletteInput}
-              variant={soundVariant}
-              onVariant={setSoundVariant}
+              choice={song.sounds ?? null}
+              onChoose={handleChooseSounds}
               filename={exportName}
               title={`Song in ${song.key}`}
               onClose={handleCloseSounds}

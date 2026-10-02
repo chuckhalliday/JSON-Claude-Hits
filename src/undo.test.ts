@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
-import { songReducer, newSong, undo, editHarmony, deletePart, duplicatePart, setDrumState, setCurrentBeat, rerollLayer, SongState } from './reducers';
+import { songReducer, newSong, undo, editHarmony, deletePart, duplicatePart, setDrumState, setCurrentBeat, rerollLayer, setSong, setSounds, SongState } from './reducers';
+import { SoundPick } from './Core/timbre';
 
 const makeStore = () => configureStore({ reducer: { song: songReducer }, middleware: d => d({ serializableCheck: false, immutableCheck: false }) });
 const st = (store: ReturnType<typeof makeStore>): SongState => store.getState().song;
@@ -65,6 +66,33 @@ describe('undo', () => {
     store.dispatch(undo());
     expect(st(store).songStructure).toBe(first);
     expect(st(store).key).toBe('C Major');
+  });
+
+  it('keeps the sound choice with its song', () => {
+    const store = setup();
+    const piano: SoundPick = { style: 'band', drums: 'Tight studio kit', bass: 'Picked electric bass', chords: 'Grand piano' };
+    const organ: SoundPick = { ...piano, chords: 'Drawbar-style organ' };
+    expect(st(store).sounds).toBeNull();
+    store.dispatch(setSounds(piano));
+    expect(st(store).sounds).toEqual(piano);
+    // Choosing sounds isn't an undo step, and edits (or undoing them) keep it.
+    expect(st(store).past ?? []).toEqual([]);
+    store.dispatch(duplicatePart(0));
+    store.dispatch(setSounds(organ));
+    store.dispatch(undo());
+    expect(st(store).sounds).toEqual(organ);
+
+    // A new song starts on the best match; undoing it brings the choice back.
+    const { past: _past, ...saved } = st(store);
+    store.dispatch(newSong({ seed: 78 }) as any);
+    expect(st(store).sounds).toBeNull();
+    store.dispatch(undo());
+    expect(st(store).sounds).toEqual(organ);
+    // Loading a saved song (the state Save stores) brings its choice along.
+    store.dispatch(newSong({ seed: 79 }) as any);
+    store.dispatch(setSong(saved));
+    expect(st(store).sounds).toEqual(organ);
+    expect(st(store).songStructure).toBe(saved.songStructure);
   });
 
   it('keeps at most 50 steps', () => {

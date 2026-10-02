@@ -934,6 +934,32 @@ input[type="range"].bpm::-moz-range-thumb {
     color: #666;
 }
 
+.soundSections {
+    width: 100%;
+    margin: 8px 0 12px;
+    border-collapse: collapse;
+    font-size: 13px;
+
+    th,
+    td {
+        padding: 6px 8px;
+        border-bottom: 1px solid #ddd;
+        text-align: left;
+        vertical-align: top;
+    }
+
+    th {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #666;
+    }
+
+    td div + div {
+        margin-top: 2px;
+    }
+}
+
 .soundActions {
     display: flex;
     flex-wrap: wrap;

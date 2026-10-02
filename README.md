@@ -13,13 +13,21 @@ Each section is **defined once**. Every repeat references it, so an edit to one 
 
 Every layer of every section can be **locked** or **re-rolled** on its own. Re-rolling a layer rebuilds the unlocked layers that depend on it and nothing else. Seeds are derived per section and layer, so re-rolling the chorus drums can't change the verse. Hand edits lock the layer they touch.
 
-**Export MIDI** downloads a type-1 Standard MIDI File: tempo, 4/4, key signature, a marker per section, GM drums on channel 10, bass, chords (with chord-symbol text events), and the guide-tone line. Logic, Cubase, Reaper and others show the section markers on their arrangement timeline.
+**Export MIDI** downloads a type-1 Standard MIDI File: tempo, 4/4, key signature, a marker per section, GM drums on channel 10, bass, chords (with chord-symbol text events), and the guide-tone line. Logic, Cubase, Reaper and others show the section markers on their arrangement timeline. Velocities follow the beat (downbeats and backbeats strongest, ghost notes and sixteenths softest) and each part's energy, so velocity-sensitive instruments respond to the arrangement.
+
+**Sounds** suggests Ableton Live 10 Suite instruments for the drums, bass, chords and guide-tone line, picked as a set from the song's own measurements (tempo, mode, chord colour, bass density, drum feel, kick/bass lock, where the parts sit in pitch). Each suggestion is a starting patch on one of Live's own instruments, built from its default state: no presets from Packs, loops, clips, reference tracks or artist names. It also lists:
+
+- the chord sound and filter position section by section, with an Instrument Rack Chain Selector setup when a section switches sound;
+- how the parts fit together (EQ split from the actual note ranges, sidechain, release lengths, where the guide line sits);
+- a User Library preset name for every sound, plus a downloadable build list for making the whole table once.
+
+The chosen combination is saved with the song. The suggestions are read-only: they never change a note.
 
 The original groove-driven generator is still available as the "Classic" engine in the Generate menu.
 
 ### Code map
 
-- `src/Core/` is the engine: `doc.ts` (song document), `form.ts`, `harmony.ts`, `rhythm.ts`, `bassline.ts`, `voicing.ts`, `drums.ts`, `generate.ts` (pipeline, re-roll, locks), `edits.ts`, `realize.ts` (document -> the editors' `Part[]` view), `midiFile.ts` / `exportMidi.ts`, `theory.ts`, `time.ts` (960 PPQ ticks), `seeds.ts`.
+- `src/Core/` is the engine: `doc.ts` (song document), `form.ts`, `harmony.ts`, `rhythm.ts`, `bassline.ts`, `voicing.ts`, `drums.ts`, `generate.ts` (pipeline, re-roll, locks), `edits.ts`, `realize.ts` (document -> the editors' `Part[]` view), `midiFile.ts` / `exportMidi.ts`, `timbre.ts` (Sounds panel suggestions), `theory.ts`, `time.ts` (960 PPQ ticks), `seeds.ts`.
 - `npm test` runs the Jest suites; `npm run build` type-checks and builds.
 
 ---

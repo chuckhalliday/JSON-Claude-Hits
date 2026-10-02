@@ -1,5 +1,7 @@
 // Sound palette: suggested Ableton Live 10 Suite instruments for a song's
-// drums, bass and chords, chosen as a set so the three parts sit together.
+// drums, bass and chords, chosen as a set so the three parts sit together,
+// plus a sound for the guide-tone line, the chord sound section by section,
+// and a User Library name to save each built sound under.
 //
 // Suggestions come only from the song itself - its tempo and mode, how
 // coloured the chords are, how busy the bass is, the drum feel, and where the
@@ -19,7 +21,7 @@ import { beatsToTickPositions } from './time';
 import { GM_DRUMS } from './exportMidi';
 import { genrePresets, normalizeTuning } from '../SongStructure/tuning';
 
-export type Role = 'drums' | 'bass' | 'chords';
+export type Role = 'drums' | 'bass' | 'chords' | 'guide';
 
 // The Live 10 Suite instruments the table recommends.
 export const LIVE10_SUITE_DEVICES = [
@@ -50,6 +52,9 @@ export interface SongFeatures {
   octaveLeaps: number; // share of bass moves that jump an octave or more
   bassTop: number; // MIDI note near the top of the bass line
   chordBottom: number; // MIDI note near the bottom of the chord voicings
+  chordTop: number; // ... and near the top
+  guideLow: number | null; // range of the guide-tone line, when the song has one
+  guideHigh: number | null;
   timePerBar: number; // hi-hat and ride hits per bar
   rideShare: number; // share of those on the ride
   snarePerBar: number;
@@ -67,14 +72,37 @@ export interface RolePick {
   why: string[];
 }
 
+// A drums / bass / chords combination by name, so a chosen combination can
+// be saved with the song and found again after edits re-rank the list.
+export interface SoundPick {
+  style: StyleId;
+  drums: string;
+  bass: string;
+  chords: string;
+}
+
+// The chord sound for one section label (every Verse, every Chorus...) and
+// what to change there.
+export interface SectionSound {
+  label: string;
+  energy: number | null; // average energy of its parts, when known
+  chords: Timbre;
+  moves: string[];
+}
+
 export interface Palette {
   style: { id: StyleId; name: string };
   summary: string;
   drums: RolePick;
   bass: RolePick;
   chords: RolePick;
+  guide: RolePick | null; // null when the song has no guide-tone line
+  // Chord sounds some sections switch to, beyond the main one.
+  extraChords: RolePick[];
+  sections: SectionSound[];
   interplay: string[];
   drumMap: string; // which pad each drum voice in the .mid plays
+  pick: SoundPick;
   variant: number; // which combination this is, best first
   variants: number;
 }
@@ -232,7 +260,7 @@ const SYNTH_PLUCK = t('Synth pluck', 'Wavetable',
   'Wavetable\'s filter driven by a fast envelope turns any bright table into a short pluck, so chords become rhythmic hits.', [
   'Osc 1 on a bright table; Amp envelope: no sustain, short decay',
   'Filter 1 low-pass with Envelope 2 on its frequency, fast decay',
-  'Echo or Simple Delay at a dotted 1/8 fills the space between chords',
+  'Echo or Delay at a dotted 1/8 fills the space between chords',
 ], 'plucked', 0.75, 0.35);
 const SOFT_PAD = t('Soft analog pad', 'Analog',
   'Analog\'s slow amp attack and LFO-swept filter make a pad that swells in under the other parts without competing with their rhythm.', [
@@ -258,6 +286,45 @@ const SOFT_KEYS = t('Soft felt keys', 'Electric',
   'EQ Eight: a high shelf down a few dB for a muffled tone',
 ], 'percussive', 0.3, 0.5);
 
+// Guide tones: one 3rd or 7th held per chord, a scaffold for writing a
+// melody, so each sound here is a clear single line.
+const SINE_LINE = t('Soft sine line', 'Operator',
+  'A lone sine oscillator is the plainest possible line: with no overtones to clash with the chords, the guide notes read clearly through them.', [
+  'Oscillator A only (sine, Coarse 1); turn Oscillators B to D off',
+  'Amp envelope: a slightly soft attack, full sustain, medium release; Voices 1',
+  'Operator\'s LFO at a low Amount and about 5 Hz on the oscillator\'s pitch for a gentle vibrato, or leave it off for a plain guide',
+], 'sustained', 0.25, 0.2);
+const BOWED_LINE = t('Bowed string line', 'Tension',
+  'Tension\'s Bow excitator keeps a modelled string sounding for as long as the note is held, so each guide tone sustains like a cello or violin line.', [
+  'Excitator: Bow; set its Force and Friction until the tone is steady rather than scratchy',
+  'Body: on at a medium size; Pickup: off',
+  'Voices 1, so the line moves from note to note',
+], 'sustained', 0.45, 0.35);
+const PLUCK_LINE = t('Clean picked line', 'Tension',
+  'Tension models a plucked string read by an electric pickup, like a clean guitar picking single notes over the chords.', [
+  'Excitator: Plectrum; Pickup: on, toward the middle of the string; Body: off',
+  'Damping low so each note rings; Voices 1',
+  'A little Chorus and a short Reverb send',
+], 'plucked', 0.55, 0.3);
+const SQUARE_LINE = t('Mellow square lead', 'Analog',
+  'Analog\'s pulse oscillator through a 12 dB low-pass filter gives a hollow, woody lead that sits apart from saw-based chords.', [
+  'Osc 1 Rect with its pulse width near the middle; Osc 2 off',
+  'Filter 1 low-pass at 12 dB, cutoff around the middle, little Reso',
+  'Mono with a short Glide, so the line slides from chord to chord',
+], 'sustained', 0.55, 0.3);
+const BELL_LINE = t('Soft bell line', 'Collision',
+  'Collision\'s Mallet striking a Plate or Beam resonator rings with bell-like overtones, a line that stays clear of held chords.', [
+  'Mallet excitator, Stiffness moderate; Resonator 1 type Plate (or Beam for a purer tone); Resonator 2 off',
+  'Shorten the resonator Decay so each guide tone rings and fades before the next chord',
+  'Keep it dry, or send a little Reverb',
+], 'percussive', 0.7, 0.15);
+const GLASS_LINE = t('Glassy wavetable lead', 'Wavetable',
+  'A bright, glassy Wavetable table played mono with glide carries a single clear line over pads or stabs.', [
+  'Osc 1 on a glassy, bell-like table; Osc 2 and Sub off; Unison off',
+  'Mono on with a short Glide',
+  'Delay at 1/8 with low feedback under the line',
+], 'sustained', 0.7, 0.25);
+
 interface Style {
   id: StyleId;
   name: string;
@@ -265,6 +332,7 @@ interface Style {
   drums: Timbre[];
   bass: Timbre[];
   chords: Timbre[];
+  guide: Timbre[];
 }
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -286,6 +354,7 @@ export const STYLES: Style[] = [
     drums: [STUDIO_KIT, ROOM_KIT],
     bass: [FINGER_BASS, PICK_BASS],
     chords: [GRAND_PIANO, PLUCKED_STRING, ORGAN],
+    guide: [PLUCK_LINE, BOWED_LINE, SINE_LINE],
   },
   {
     id: 'soul', name: 'Soul / jazz combo',
@@ -294,6 +363,7 @@ export const STYLES: Style[] = [
     drums: [BRUSH_KIT, VINTAGE_KIT],
     bass: [UPRIGHT_BASS, ROUND_BASS],
     chords: [TINE_EP, VIBES, ORGAN],
+    guide: [SINE_LINE, BELL_LINE, BOWED_LINE],
   },
   {
     id: 'blues', name: 'Blues & roots',
@@ -301,6 +371,7 @@ export const STYLES: Style[] = [
     drums: [VINTAGE_KIT, STUDIO_KIT],
     bass: [FINGER_BASS, UPRIGHT_BASS],
     chords: [ORGAN, GRITTY_EP, TINE_EP],
+    guide: [PLUCK_LINE, BOWED_LINE, SINE_LINE],
   },
   {
     id: 'synthpop', name: 'Synth-pop',
@@ -309,6 +380,7 @@ export const STYLES: Style[] = [
     drums: [MACHINE_808, MACHINE_909],
     bass: [ANALOG_BASS, OCTAVE_BASS],
     chords: [POLY_SYNTH, SYNTH_PLUCK, SOFT_PAD],
+    guide: [SQUARE_LINE, GLASS_LINE, BELL_LINE],
   },
   {
     id: 'club', name: 'Club / electronic',
@@ -317,6 +389,7 @@ export const STYLES: Style[] = [
     drums: [MACHINE_909, MACHINE_808],
     bass: [SUB_BASS, REESE_BASS],
     chords: [STAB, WIDE_PAD, SYNTH_PLUCK],
+    guide: [GLASS_LINE, BELL_LINE, SINE_LINE],
   },
   {
     id: 'downtempo', name: 'Downtempo / lo-fi',
@@ -324,6 +397,7 @@ export const STYLES: Style[] = [
     drums: [DUSTY_KIT, MACHINE_808],
     bass: [SUB_BASS, FINGER_BASS],
     chords: [TINE_EP, SOFT_KEYS, SOFT_PAD],
+    guide: [SINE_LINE, BELL_LINE, BOWED_LINE],
   },
 ];
 
@@ -404,6 +478,8 @@ export function songFeatures(input: PaletteInput): SongFeatures {
     });
   });
 
+  const guides = parts.flatMap(p => p.guideTones ?? []).filter(m => m > 0);
+
   const withEnergy = parts.filter(p => typeof p.energy === 'number');
   const byEnergy = [...withEnergy].sort((a, b) => a.energy! - b.energy!);
   const ends = byEnergy.length > 0
@@ -422,6 +498,9 @@ export function songFeatures(input: PaletteInput): SongFeatures {
     octaveLeaps: moves ? leaps / moves : 0,
     bassTop: quantile(bassNotes.map(n => n.midi), 0.9, 48),
     chordBottom: quantile(chords.map(c => Math.min(...c)), 0.1, 60),
+    chordTop: quantile(chords.map(c => Math.max(...c)), 0.9, 72),
+    guideLow: guides.length ? quantile(guides, 0.1, 60) : null,
+    guideHigh: guides.length ? quantile(guides, 0.9, 72) : null,
     timePerBar: time / bars,
     rideShare: time ? ride / time : 0,
     snarePerBar: snares / bars,
@@ -478,6 +557,11 @@ interface Combo {
   chords: Timbre;
   score: number;
 }
+
+const pickOf = (c: Combo): SoundPick => ({ style: c.style.id, drums: c.drums.name, bass: c.bass.name, chords: c.chords.name });
+
+export const samePick = (a: SoundPick | null | undefined, b: SoundPick | null | undefined) =>
+  !!a && !!b && a.style === b.style && a.drums === b.drums && a.bass === b.bass && a.chords === b.chords;
 
 // Every drums x bass x chords combination of the two best-fitting styles,
 // best first. Variant 0 is the suggestion; later ones are the alternatives
@@ -537,7 +621,61 @@ function chordsWhy(f: SongFeatures, c: Timbre): string[] {
   return why;
 }
 
-function interplayNotes(f: SongFeatures, drums: Timbre, bass: Timbre, chords: Timbre): string[] {
+// The guide line has to read through the chords: a different attack or
+// brightness from the chord sound (two pads melt into one), sustained when
+// chords are held for a bar or more, and preferably another instrument.
+function guideScore(g: Timbre, i: number, f: SongFeatures, chords: Timbre): number {
+  const contrast = Math.min(0.4, Math.abs(g.brightness - chords.brightness));
+  const attack = g.attack !== chords.attack ? 0.2 : 0;
+  const held = g.attack === 'sustained' ? 0.15 * clamp01(2 - f.chordsPerBar) : 0;
+  const sameDevice = g.device === chords.device ? 0.15 : 0;
+  return rankBonus(i) + contrast + attack + held - sameDevice;
+}
+
+function guideWhy(f: SongFeatures, g: Timbre, chords: Timbre): string[] {
+  const why = ['One 3rd or 7th held per chord: a scaffold to write the melody against, so it should read clearly on its own'];
+  if (g.attack !== chords.attack) why.push(`A ${g.attack} line against ${chords.attack} chords, so the two stay distinct`);
+  else why.push(g.brightness > chords.brightness ? 'Brighter than the chord sound, so the line sits on top of it' : 'Plainer than the chord sound, so the line doesn\'t compete with its colour');
+  if (g.attack === 'sustained' && f.chordsPerBar < 1.5) why.push('Chords mostly last a bar or more, and a sustained line holds each guide tone that long');
+  return why;
+}
+
+const listText = (items: string[]) => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`);
+
+// A section only leaves the main chord sound when another fits it clearly better.
+const SWITCH_MARGIN = 0.1;
+
+// The chord sound for each section label, scored like the main pick but on
+// that section's own measurements (a quiet, sparse verse can want a
+// different sound from a driving chorus), from the chosen style's chord
+// sounds. Sections with an energy also get a filter position, closed for
+// the quietest through open for the loudest.
+function sectionSounds(input: PaletteInput, style: Style, drums: Timbre, bass: Timbre, chords: Timbre): SectionSound[] {
+  const parts = input.songStructure;
+  const energyOf = (ps: Part[]) => ps.map(p => p.energy).filter((e): e is number => typeof e === 'number');
+  const all = energyOf(parts);
+  const lo = all.length ? Math.min(...all) : 0;
+  const range = all.length ? Math.max(...all) - lo : 0;
+  const mainIndex = style.chords.indexOf(chords);
+  return [...new Set(parts.map(p => p.type))].map(label => {
+    const own = parts.filter(p => p.type === label);
+    const f = songFeatures({ ...input, songStructure: own });
+    const scored = style.chords.map((c, i) => ({ c, score: chordScore(c, i, f, bass, drums) }));
+    const best = scored.reduce((a, b) => (b.score > a.score ? b : a));
+    const pick = best.c !== chords && best.score > scored[mainIndex].score + SWITCH_MARGIN ? best.c : chords;
+    const known = energyOf(own);
+    const energy = known.length ? sum(known) / known.length : null;
+    const moves: string[] = [];
+    if (pick !== chords) moves.push(`Chords: ${pick.name}. ${chordsWhy(f, pick)[0]}`);
+    if (energy !== null && range >= 0.2) {
+      const r = (energy - lo) / range;
+      moves.push(r >= 0.67 ? 'Chord filter fully open' : r <= 0.33 ? 'Chord filter mostly closed, so the chords sit darker and further back' : 'Chord filter about half open');
+    }
+    return { label, energy, chords: pick, moves };
+  });
+}
+
+function interplayNotes(f: SongFeatures, drums: Timbre, bass: Timbre, chords: Timbre, guide: Timbre | null, extras: Timbre[]): string[] {
   const notes: string[] = [];
   const gap = f.chordBottom - f.bassTop;
   const cut = Math.round((hz(f.chordBottom) * 0.75) / 10) * 10;
@@ -563,7 +701,17 @@ function interplayNotes(f: SongFeatures, drums: Timbre, bass: Timbre, chords: Ti
   else if (f.bpm < 90) notes.push(`At ${f.bpm} BPM there's room for longer releases and a bigger Reverb on the chords.`);
   if (f.swing > 0.05) notes.push('The groove has triplet steps: a Velocity MIDI effect with a little Random on Drums keeps the shuffle human.');
   if (f.loudest && f.quietest && f.loudest.energy - f.quietest.energy >= 0.3) {
-    notes.push(`Energy runs from the ${f.quietest.label} (quietest) to the ${f.loudest.label} (loudest): automate the chord instrument's filter cutoff to open up for the loud sections.`);
+    notes.push(`Energy runs from the ${f.quietest.label} (quietest) to the ${f.loudest.label} (loudest): automate the chord instrument's filter cutoff to open up for the loud sections (positions under Section by section).`);
+  }
+  if (extras.length > 0) {
+    notes.push(`Chords change sound between sections: put ${listText([chords, ...extras].map(c => c.name))} in one Instrument Rack on the Chords track, one chain each, give each chain its own Chain Select zone, and automate the Chain Selector at the section markers.`);
+  }
+  if (guide && f.guideLow !== null && f.guideHigh !== null) {
+    const span = `${liveNoteName(f.guideLow)}–${liveNoteName(f.guideHigh)}`;
+    notes.push((f.guideLow >= f.chordBottom && f.guideHigh <= f.chordTop
+      ? `The guide line (${span}) sits inside the chord voicings: move its clip up an octave or pan it away from the chords so it reads on its own, and keep it a few dB under them.`
+      : `The guide line (${span}) sits clear of the chord voicings; keep it a few dB under the chords.`)
+      + ' It\'s a scaffold for writing your melody, so mute it once the melody is in.');
   }
   return notes;
 }
@@ -576,14 +724,23 @@ const DRUM_MAP = DRUM_VOICES.map((_, v) => v)
   .map(v => `${DRUM_NAMES[v]} ${liveNoteName(GM_DRUMS[v])}`)
   .join(', ');
 
-// The palette for a song. `variant` steps through the alternatives (it
-// wraps), best first. Deterministic: the same song always gets the same
-// suggestions, and no random stream is touched.
-export function suggestPalette(input: PaletteInput, variant = 0): Palette {
+// The palette for a song. `choice` is a combination index (it wraps; 0 is
+// the best match) or a saved SoundPick, which falls back to the best match
+// once edits have moved the song away from that combination's styles.
+// Deterministic: the same song always gets the same suggestions, and no
+// random stream is touched.
+export function suggestPalette(input: PaletteInput, choice: number | SoundPick | null = 0): Palette {
   const f = songFeatures(input);
   const combos = rankedCombos(f);
-  const index = ((Math.floor(variant) % combos.length) + combos.length) % combos.length;
-  const { style, drums, bass, chords } = combos[index];
+  const n = typeof choice === 'number' ? choice : Math.max(0, combos.findIndex(c => samePick(pickOf(c), choice)));
+  const index = ((Math.floor(n) % combos.length) + combos.length) % combos.length;
+  const combo = combos[index];
+  const { style, drums, bass, chords } = combo;
+  const guide = f.guideLow === null ? null : style.guide
+    .map((g, i) => ({ g, score: guideScore(g, i, f, chords) }))
+    .reduce((a, b) => (b.score > a.score ? b : a)).g;
+  const sections = sectionSounds(input, style, drums, bass, chords);
+  const extras = [...new Set(sections.map(sec => sec.chords).filter(c => c !== chords))];
   const summary = `${f.bpm} BPM ${MODE_NAMES[f.mode].toLowerCase()}, ${hatsText(f)}, ${f.bassNotesPerBar.toFixed(1)} bass notes a bar, `
     + `${pct(f.chordColor)} coloured chords${f.swing > 0.05 ? ', triplet feel' : ''}${f.genre ? `, ${f.genre} dials` : ''}`;
   return {
@@ -592,14 +749,67 @@ export function suggestPalette(input: PaletteInput, variant = 0): Palette {
     drums: { role: 'drums', timbre: drums, why: drumsWhy(f, style, drums) },
     bass: { role: 'bass', timbre: bass, why: bassWhy(f, bass) },
     chords: { role: 'chords', timbre: chords, why: chordsWhy(f, chords) },
-    interplay: interplayNotes(f, drums, bass, chords),
+    guide: guide && { role: 'guide', timbre: guide, why: guideWhy(f, guide, chords) },
+    extraChords: extras.map(c => ({
+      role: 'chords',
+      timbre: c,
+      why: [`For the ${listText(sections.filter(sec => sec.chords === c).map(sec => sec.label))}, in place of ${chords.name}`],
+    })),
+    sections,
+    interplay: interplayNotes(f, drums, bass, chords, guide, extras),
     drumMap: DRUM_MAP,
+    pick: pickOf(combo),
     variant: index,
     variants: combos.length,
   };
 }
 
-export const ROLE_TITLES: Record<Role, string> = { drums: 'Drums', bass: 'Bass', chords: 'Chords' };
+export const ROLE_TITLES: Record<Role, string> = { drums: 'Drums', bass: 'Bass', chords: 'Chords', guide: 'Guide tones' };
+
+// ---- Saving built sounds -------------------------------------------------
+//
+// A sound built from its starting patch can be saved to Live's User Library
+// under a fixed name, so next time it's one Browser search away instead of
+// another build. The prefix keeps that search to your own presets.
+
+export const presetName = (tb: Timbre) => `JCH ${tb.name}`;
+
+export const saveStep = (tb: Timbre) => (tb.device === 'Drum Rack'
+  ? `Save the Drum Rack to your User Library (the save button in its title bar) as "${presetName(tb)}"`
+  : `Select ${tb.device} and any effects after it, group them into an Instrument Rack (Ctrl+G, or Cmd+G on a Mac), and save the rack to your User Library as "${presetName(tb)}"`);
+
+const ROLES: Role[] = ['drums', 'bass', 'chords', 'guide'];
+
+// Every sound in the table, once each, by role.
+export function allTimbres(): Record<Role, Timbre[]> {
+  const out = { drums: [], bass: [], chords: [], guide: [] } as Record<Role, Timbre[]>;
+  ROLES.forEach(role => STYLES.forEach(style => style[role].forEach(tb => {
+    if (!out[role].includes(tb)) out[role].push(tb);
+  })));
+  return out;
+}
+
+// A checklist for building the whole table once, as plain text.
+export function presetLibraryText(): string {
+  const lines = [
+    'Ableton Live 10 Suite preset build list',
+    'Build each sound once from its instrument\'s default state and save it as shown. After that, search Live\'s Browser for the preset name the Sounds panel gives.',
+    'Every sound uses Live 10 Suite\'s own instruments; the sampled kits and the piano use single hits or notes from Live\'s library.',
+    '',
+  ];
+  const table = allTimbres();
+  for (const role of ROLES) {
+    lines.push(`${ROLE_TITLES[role].toUpperCase()} (${table[role].length})`);
+    table[role].forEach(tb => {
+      lines.push(`  [ ] ${presetName(tb)} (${tb.device})`);
+      lines.push(`      ${tb.basis}`);
+      tb.setup.forEach((step, i) => lines.push(`      ${i + 1}. ${step}`));
+      lines.push(`      ${tb.setup.length + 1}. ${saveStep(tb)}`);
+    });
+    lines.push('');
+  }
+  return lines.join('\n');
+}
 
 // The palette as plain text, for the sound sheet download.
 export function paletteText(palette: Palette, title: string): string {
@@ -607,18 +817,31 @@ export function paletteText(palette: Palette, title: string): string {
     `${title} — Ableton Live 10 Suite sound palette`,
     `Style: ${palette.style.name}`,
     `Measured: ${palette.summary}`,
+    'Built a sound before? Search Live\'s Browser for its saved preset name. First time: follow its starting patch, then save it.',
     '',
   ];
-  for (const pick of [palette.drums, palette.bass, palette.chords]) {
+  const block = (pick: RolePick, heading: string) => {
     const tb = pick.timbre;
-    lines.push(`${ROLE_TITLES[pick.role].toUpperCase()}: ${tb.name}`);
+    lines.push(`${heading}: ${tb.name}`);
     lines.push(`  Device: ${tb.device}`);
+    lines.push(`  Saved preset: ${presetName(tb)}`);
     lines.push(`  Why this device: ${tb.basis}`);
     lines.push('  Why for this song:');
     pick.why.forEach(w => lines.push(`    · ${w}`));
     lines.push('  Starting patch:');
     tb.setup.forEach((step, i) => lines.push(`    ${i + 1}. ${step}`));
+    lines.push(`    ${tb.setup.length + 1}. ${saveStep(tb)}`);
     if (pick.role === 'drums') lines.push(`  Pads: ${palette.drumMap}`);
+    lines.push('');
+  };
+  [palette.drums, palette.bass, palette.chords, palette.guide].forEach(pick => pick && block(pick, ROLE_TITLES[pick.role].toUpperCase()));
+  palette.extraChords.forEach(pick => block(pick, 'CHORDS, SOME SECTIONS'));
+  if (palette.sections.some(sec => sec.moves.length > 0)) {
+    lines.push('SECTION BY SECTION');
+    palette.sections.forEach(sec => {
+      lines.push(`  ${sec.label}${sec.energy !== null ? ` (energy ${pct(sec.energy)})` : ''}: ${sec.chords.name}`);
+      sec.moves.forEach(m => lines.push(`    · ${m}`));
+    });
     lines.push('');
   }
   lines.push('HOW THEY FIT TOGETHER');

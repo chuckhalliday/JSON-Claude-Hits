@@ -8,6 +8,7 @@ import { editBass, editDrum, editChordTone, editChord } from "./Core/edits";
 import { ChordEvent } from "./Core/theory";
 import { keyName } from "./Core/theory";
 import { LoopRegion, LoopSpan, comparePoints } from "./Playback/loop";
+import { SoundPick } from "./Core/timbre";
 
 export interface SongState {
     isPlaying: boolean,
@@ -33,6 +34,9 @@ export interface SongState {
     // complete the region from it).
     loopPick?: 'start' | 'end' | null,
     loopAnchor?: LoopSpan | null,
+    // The sound combination picked in the Sounds panel, by name; null (or
+    // absent, in older saves) follows the best match. Saved with the song.
+    sounds?: SoundPick | null,
     // Undo history: the song as it was before each undoable change, newest
     // last (see `songReducer`). Not saved with a song.
     past?: UndoSnapshot[]
@@ -50,6 +54,7 @@ export interface UndoSnapshot {
   selectedBeat: number[];
   loop: LoopRegion | null;
   loopEnabled: boolean;
+  sounds: SoundPick | null;
 }
 
 // The song tree starts empty and deterministic. The first song is produced by
@@ -69,7 +74,8 @@ const initialState: SongState = {
     loop: null,
     loopEnabled: false,
     loopPick: null,
-    loopAnchor: null
+    loopAnchor: null,
+    sounds: null
 };
 
 // Everything setSong needs to load a sculpted document.
@@ -139,13 +145,15 @@ const song = createSlice({
       setAcoustic: (state, action: PayloadAction<{ acoustic: boolean }>) => {
         state.acoustic = action.payload.acoustic;
       },
-      setSong: (state, action: PayloadAction<{ songStructure: SongStructure, key: string, bpm: number, seed?: number | null, params?: SongParams | null, doc?: SongDoc | null }>) => {
+      setSong: (state, action: PayloadAction<{ songStructure: SongStructure, key: string, bpm: number, seed?: number | null, params?: SongParams | null, doc?: SongDoc | null, sounds?: SoundPick | null }>) => {
         state.songStructure = action.payload.songStructure;
         state.key = action.payload.key;
         state.bpm = action.payload.bpm;
         state.seed = action.payload.seed ?? null;
         state.params = action.payload.params ?? null;
         state.doc = action.payload.doc ?? null;
+        // A saved song brings its sound choice; a new one starts on the best match.
+        state.sounds = action.payload.sounds ?? null;
         state.selectedBeat = [0, 0, 0, 0];
         // Bar positions belong to the old song.
         state.loop = null;
@@ -271,6 +279,10 @@ const song = createSlice({
       toggleLoop: (state) => {
         if (state.loop) state.loopEnabled = !state.loopEnabled;
       },
+      // Choose a combination in the Sounds panel (null = follow the best match).
+      setSounds: (state, action: PayloadAction<SoundPick | null>) => {
+        state.sounds = action.payload;
+      },
       // Change one chord of a section's progression (root/quality, applied or
       // borrowed chords, inversion) - every instance follows.
       editHarmony: (state, action: PayloadAction<{ part: number, chord: number, change: Partial<Pick<ChordEvent, 'root' | 'quality' | 'inversion' | 'appliedTo' | 'fn'>> }>) => {
@@ -348,7 +360,7 @@ const song = createSlice({
     },
   });
 
-export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, editHarmony, setPartLinked, duplicatePart, deletePart } = song.actions;
+export const { setIsPlaying, setMidi, setAcoustic, setSong, setBassState, setDrumState, setChordState, setCurrentBeat, reorderParts, incrementByAmount, loadSong, rerollLayer, toggleLock, setPartEnergy, setLoop, setLoopPick, pickLoopSpan, extendLoop, toggleLoop, setSounds, editHarmony, setPartLinked, duplicatePart, deletePart } = song.actions;
 
 // Thunk: generate a fresh form-first song and load it into the store.
 // Dispatched on mount and by the song tabs. Pass a seed (or full options)
@@ -391,6 +403,7 @@ const snapshotOf = (state: SongState, label: string): UndoSnapshot => ({
   selectedBeat: state.selectedBeat,
   loop: state.loop ?? null,
   loopEnabled: !!state.loopEnabled,
+  sounds: state.sounds ?? null,
 });
 
 // The song slice with undo: before an undoable action that actually changes
@@ -400,8 +413,11 @@ export function songReducer(state: SongState | undefined, action: AnyAction): So
   if (undo.match(action)) {
     const past = state?.past ?? [];
     if (!state || past.length === 0) return state ?? song.reducer(undefined, action);
-    const { label: _label, ...restore } = past[past.length - 1];
-    return { ...state, ...restore, past: past.slice(0, -1), isPlaying: false, loopPick: null, loopAnchor: null };
+    const { label, sounds, ...restore } = past[past.length - 1];
+    // The sound choice belongs to its song: undoing a new song brings back
+    // the old song's choice, while undoing an edit keeps the current one.
+    const keepSounds = label !== UNDOABLE[song.actions.setSong.type];
+    return { ...state, ...restore, sounds: keepSounds ? state.sounds ?? null : sounds, past: past.slice(0, -1), isPlaying: false, loopPick: null, loopAnchor: null };
   }
   const next = song.reducer(state, action);
   const label = UNDOABLE[action.type];
