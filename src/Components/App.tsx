@@ -6,7 +6,7 @@ import Sounds from './Sounds';
 import SectionPanel from './SectionPanel';
 import { SHORT_LABELS } from '../Core/form';
 import { downloadMidi } from '../Core/exportMidi';
-import { suggestPalette, PaletteInput } from '../Core/timbre';
+import { PaletteInput } from '../Core/timbre';
 import { SectionLabel } from '../Core/doc';
 import DrumMachine from "./DrumMachine";
 import BassStaff from "./BassStaff";
@@ -62,8 +62,7 @@ function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [saveScreen, setSaveScreen] = useState(false);
   const [soundsScreen, setSoundsScreen] = useState(false);
-  // Which suggested sound combination the Sounds panel shows (0 = best
-  // match); Export MIDI names its tracks after the same one.
+  // Which suggested sound combination the Sounds panel shows (0 = best match).
   const [soundVariant, setSoundVariant] = useState(0);
   const anyPartOpen = Object.values(openedParts).some(Boolean);
 
@@ -600,11 +599,9 @@ function App() {
   const exportName = `${song.key.replace(/\s+/g, '-')}-${song.bpm}bpm${song.seed != null ? `-${song.seed}` : ''}`;
   const handleCloseSounds = useCallback(() => setSoundsScreen(false), []);
 
-  // Download the song (with every edit) as a Standard MIDI File for a DAW,
-  // its tracks named after the suggested Live 10 Suite sounds.
+  // Download the song (with every edit) as a Standard MIDI File for a DAW.
   const handleExport = () => {
-    const palette = song.songStructure.length > 0 ? suggestPalette(paletteInput, soundVariant) : null;
-    downloadMidi({ songStructure: song.songStructure, bpm: song.bpm, key: song.key, title: `Song in ${song.key}`, palette }, exportName);
+    downloadMidi({ songStructure: song.songStructure, bpm: song.bpm, key: song.key, title: `Song in ${song.key}` }, exportName);
   };
 
   const handleMidi = async () => {
@@ -883,8 +880,8 @@ function App() {
             <button onClick={handleMidi} className={styles.button}>
               {midi ? "Use Osc" : "Use Midi"}
             </button>
-            <button onClick={() => setSoundsScreen(true)} disabled={song.songStructure.length === 0} className={styles.button} title="Suggested Ableton Live 10 Suite instruments for this song's drums, bass and chords">Sounds</button>
-            <button onClick={handleExport} className={styles.button} title="Download a multitrack .mid (drums, bass, chords, guide tones, section markers) for your DAW, with tracks named after the suggested sounds">Export MIDI</button>
+            <button onClick={() => setSoundsScreen(true)} disabled={song.songStructure.length === 0} className={styles.button} title="Recommended Ableton Live 10 Suite instruments for this song's drums, bass and chords">Sounds</button>
+            <button onClick={handleExport} className={styles.button} title="Download a multitrack .mid (drums, bass, chords, guide tones, section markers) for your DAW">Export MIDI</button>
             <button onClick={handleSaveClick} className={styles.button}>Save/Load</button>
             <button onClick={logout} className={styles.button}>Log Out</button>
           </div>

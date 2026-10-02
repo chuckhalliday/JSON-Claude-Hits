@@ -24,21 +24,22 @@ function downloadText(text: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function SoundCard({ pick }: { pick: RolePick }) {
+function SoundCard({ pick, drumMap }: { pick: RolePick; drumMap?: string }) {
   const tb = pick.timbre;
   return (
     <div className={styles.soundCard}>
       <div className={styles.soundRole}>{ROLE_TITLES[pick.role]}</div>
       <div className={styles.soundName}>{tb.name}</div>
-      <div className={styles.soundMeta}>
-        <span><b>{tb.device}</b></span>
-        <span>{tb.browse}</span>
-        <span>Search: {tb.search.map(s => `“${s}”`).join(' or ')}</span>
-      </div>
+      <div className={styles.soundMeta}><b>{tb.device}</b></div>
+      <p className={styles.soundTip}>{tb.basis}</p>
       <ul className={styles.soundWhy}>
         {pick.why.map(w => <li key={w}>{w}</li>)}
       </ul>
-      {tb.tips.map(tip => <p key={tip} className={styles.soundTip}>Tip: {tip}</p>)}
+      <div className={styles.soundRole}>Starting patch</div>
+      <ol className={styles.soundWhy}>
+        {tb.setup.map(step => <li key={step}>{step}</li>)}
+      </ol>
+      {drumMap && <p className={styles.soundTip}>Pads the .mid plays: {drumMap}</p>}
     </div>
   );
 }
@@ -64,11 +65,12 @@ export default function Sounds({ input, variant, onVariant, filename, title, onC
         <b>{palette.style.name}</b> · {palette.summary}
       </p>
       <p className={styles.soundNote}>
-        Picked from Live's own instruments to suit this song's tempo, chords, bass and drums. These are
-        instruments and presets only, never Clips or Samples loops, and choosing them never changes a note.
+        Recommended from what each Live 10 Suite instrument is built to do, to suit this song's tempo, chords,
+        bass and drums. Load the exported .mid into Live, then set these up on its tracks. Choosing them never
+        changes a note.
       </p>
       <div className={styles.soundGrid}>
-        <SoundCard pick={palette.drums} />
+        <SoundCard pick={palette.drums} drumMap={palette.drumMap} />
         <SoundCard pick={palette.bass} />
         <SoundCard pick={palette.chords} />
       </div>
@@ -85,9 +87,6 @@ export default function Sounds({ input, variant, onVariant, filename, title, onC
           Download sound sheet
         </button>
       </div>
-      <p className={styles.soundNote}>
-        Export MIDI names the Drums, Bass and Chords tracks after the combination shown here.
-      </p>
     </div>
   );
 }
