@@ -4,6 +4,7 @@ import Generate from './Generate';
 import Save from './Save';
 import Sounds from './Sounds';
 import SectionPanel from './SectionPanel';
+import Transport, { SoundSource, Track } from './Transport';
 import { SHORT_LABELS } from '../Core/form';
 import { downloadMidi } from '../Core/exportMidi';
 import { PaletteInput, SoundPick } from '../Core/timbre';
@@ -581,8 +582,35 @@ function App() {
   const loopRegion = clampRegion(song.loop, song.songStructure);
   const loopOn = !!song.loopEnabled && loopRegion !== null;
 
-  const handleAcoustic = () => {
-    dispatch(setAcoustic({ acoustic: !acoustic }));
+  // Space plays/pauses, unless focus is somewhere Space already means
+  // something (a text field, or a button Space would click).
+  const handleStartClickRef = React.useRef(handleStartClick);
+  handleStartClickRef.current = handleStartClick;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement;
+      if (target.closest('input, textarea, select, button, [contenteditable="true"], [role="spinbutton"], [role="menuitem"]')) return;
+      e.preventDefault();
+      handleStartClickRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const handleSourceChange = (source: SoundSource) => {
+    if (source === 'midi') {
+      if (!midi) handleMidi();
+      return;
+    }
+    if (midi) handleMidi();
+    if (acoustic !== (source === 'acoustic')) dispatch(setAcoustic({ acoustic: source === 'acoustic' }));
+  };
+
+  const handleToggleTrack = (track: Track) => {
+    if (track === 'chords') setIncludeChords(prev => !prev);
+    else if (track === 'bass') setIncludeBass(prev => !prev);
+    else setIncludeDrums(prev => !prev);
   };
 
   const paletteInput: PaletteInput = React.useMemo(() => ({
@@ -783,107 +811,33 @@ function App() {
         </div>
         {/* Renders controls */}
         <div className={styles.footer} ref={footerRef}>
-        <div className={styles.controls}>
-          <button className={styles.key} onClick={handleGenerateClick}>Key of :<br />{song.key}</button>
-          {!midi && (
-            <button className={`${styles.button} ${styles.oscToggle}`} onClick={handleAcoustic}>
-              {acoustic ? "Acoustic" : "Synth"}
-            </button>
-          )}
-          <div className={styles.songControls}>
-            <button
-              onClick={() => setIncludeChords(prev => !prev)}
-              className={includeChords ? styles.button : `${styles.button} ${styles.openButton}`}
-            >
-              Chords
-            </button>
-            <button
-              onClick={() => setIncludeBass(prev => !prev)}
-              className={includeBass ? styles.button : `${styles.button} ${styles.openButton}`}
-            >
-              Bass
-            </button>
-            <button
-              onClick={() => setIncludeDrums(prev => !prev)}
-              className={includeDrums ? styles.button : `${styles.button} ${styles.openButton}`}
-            >
-              Drums
-            </button>
-          </div>
-          <div className={styles.bpmControls}>
-            <label className={styles.fader}>
-              <span className={styles.bpmRow}>BPM:{bpm}</span>
-              <div className={styles.bpmRow}>
-                <input
-                  className={styles.bpm}
-                  type="range"
-                  min={90}
-                  max={150}
-                  step={1}
-                  onChange={(e) => dispatch(incrementByAmount(e.target.value))}
-                  defaultValue={bpm}
-                />
-              </div>
-            </label>
-            {/*<label className={styles.fader}>
-              <span>Volume</span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                onChange={handleVolumeChange}
-                defaultValue={1}
-              />
-            </label> */}
-            <button
-              onClick={handleStartClick}
-              className={isPlaying ? `${styles.button} ${styles.openButton}` : styles.button}
-            >
-              {isPlaying ? "Pause" : "Play Song"}
-            </button>
-          </div>
-          <div className={styles.loopControls}>
-            <div className={styles.loopButtons}>
-              <button
-                onClick={() => dispatch(toggleLoop())}
-                disabled={!loopRegion}
-                className={loopOn ? `${styles.button} ${styles.openButton}` : styles.button}
-                title={loopRegion ? 'Cycle playback between the loop points' : 'Set loop points first: Set Start, then click where it starts and where it ends - or click a bar number above the drum grid'}
-              >
-                ⟳ Loop
-              </button>
-              <button
-                onClick={() => armLoopPick('start')}
-                className={loopPick === 'start' ? `${styles.button} ${styles.pickArmed}` : styles.button}
-                aria-pressed={loopPick === 'start'}
-                title="Then click a step lamp or bar number to start the loop there"
-              >Set Start</button>
-              <button
-                onClick={() => armLoopPick('end')}
-                className={loopPick === 'end' ? `${styles.button} ${styles.pickArmed}` : styles.button}
-                aria-pressed={loopPick === 'end'}
-                title="Then click a step lamp or bar number to end the loop there (that step or bar is included)"
-              >Set End</button>
-            </div>
-            <span className={styles.loopReadout}>
-              {loopPick
-                ? `Click a step or bar number for the loop ${loopPick} (Esc to cancel)`
-                : loopRegion
-                  ? `${describePoint(loopRegion.start, song.songStructure)} → ${describePoint(loopRegion.end, song.songStructure)}`
-                  : 'No loop set'}
-            </span>
-          </div>
-          <div className={styles.midiControls}>
-            <button onClick={handleMidi} className={styles.button}>
-              {midi ? "Use Osc" : "Use Midi"}
-            </button>
-            <button onClick={() => setSoundsScreen(true)} disabled={song.songStructure.length === 0} className={styles.button} title="Recommended Ableton Live 10 Suite instruments for this song's drums, bass and chords">Sounds</button>
-            <button onClick={handleExport} className={styles.button} title="Download a multitrack .mid (drums, bass, chords, guide tones, section markers) for your DAW">Export MIDI</button>
-            <button onClick={handleSaveClick} className={styles.button}>Save/Load</button>
-            <button onClick={logout} className={styles.button}>Log Out</button>
-          </div>
-        </div>
+        <Transport
+          songKey={song.key}
+          onKeyClick={handleGenerateClick}
+          source={midi ? 'midi' : acoustic ? 'acoustic' : 'synth'}
+          onSourceChange={handleSourceChange}
+          isPlaying={isPlaying}
+          onPlay={handleStartClick}
+          bpm={bpm}
+          onBpmChange={(value) => dispatch(incrementByAmount(`${value}`))}
+          tracks={{ chords: includeChords, bass: includeBass, drums: includeDrums }}
+          onToggleTrack={handleToggleTrack}
+          loopOn={loopOn}
+          hasLoop={!!loopRegion}
+          onToggleLoop={() => dispatch(toggleLoop())}
+          loopPick={loopPick}
+          onArmLoopPick={armLoopPick}
+          loopReadout={loopPick
+            ? `Click a step or bar number for the loop ${loopPick} (Esc to cancel)`
+            : loopRegion
+              ? `${describePoint(loopRegion.start, song.songStructure)} → ${describePoint(loopRegion.end, song.songStructure)}`
+              : 'No loop set'}
+          hasSong={song.songStructure.length > 0}
+          onSave={handleSaveClick}
+          onSounds={() => setSoundsScreen(true)}
+          onExport={handleExport}
+          onLogout={logout}
+        />
         {canUseSongTabs && (
           <div className={styles.songTabs}>
             {Array.from({ length: SONG_TAB_COUNT }, (_, index) => (

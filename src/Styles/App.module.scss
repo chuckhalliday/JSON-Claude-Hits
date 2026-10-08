@@ -159,33 +159,6 @@
   pointer-events: none;
 }
 
-.key {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 60px;
-  height: 60px;
-  margin-right: 20px;
-  border: none;
-  cursor: pointer;
-  appearance: none;
-  background-color: rgb(71, 182, 71);
-  color: black;
-  border-radius: 6px;
-  font-weight: 700;
-  font-size: 10px;
-  line-height: 1.3;
-  text-align: center;
-  overflow: hidden;
-  transition: background-color 0.3s;
-
-  &:hover {
-    background-color: #4281b2;
-  }
-}
-
 .partsRow {
     display: flex;
     flex-direction: row;
@@ -253,18 +226,405 @@
     bottom: 0;
     left: 0;
     z-index: 2;
-    background-color: #fff;
+    background-color: var(--c-surface);
+    box-shadow: var(--shadow-bar);
     width: 100%;
     box-sizing: border-box;
 }
 
-.controls {
-    position: relative;
-    padding: 10px 90px;
-    box-sizing: border-box;
+// Transport bar: [key · sound source] [loop · play · tempo / loop points]
+// [tracks · save · more]. The side groups wrap under the center on narrow
+// windows.
+.transport {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    column-gap: 24px;
+    row-gap: 10px;
+    padding: 10px 16px;
+    color: var(--c-text);
+
+    button {
+      font-family: inherit;
+    }
+
+    @media (max-width: 1000px) {
+      grid-template-columns: 1fr 1fr;
+
+      .transportCenter {
+        grid-column: 1 / -1;
+        grid-row: 1;
+      }
+    }
+}
+
+.transportSide {
     display: flex;
-    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+}
+
+.transportRight {
+    justify-content: flex-end;
+}
+
+.transportActions {
+    display: flex;
+    align-items: center;
+    column-gap: 6px;
+}
+
+.transportCenter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    row-gap: 6px;
+}
+
+.transportMain {
+    display: flex;
+    align-items: center;
+    column-gap: 14px;
+}
+
+.keyChip {
+    display: flex;
+    flex-direction: column;
     align-items: flex-start;
+    padding: 5px 12px;
+    border: 1px solid var(--c-border);
+    border-left: 4px solid var(--c-accent);
+    border-radius: var(--radius);
+    background: var(--c-surface);
+    cursor: pointer;
+    text-align: left;
+    transition: background-color 0.15s, border-color 0.15s;
+
+    &:hover {
+      background: var(--c-accent-soft);
+      border-color: var(--c-accent);
+    }
+}
+
+.keyChipLabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--c-text-muted);
+}
+
+.keyChipValue {
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.segmented {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: var(--radius);
+    background: var(--c-surface-2);
+
+    button {
+      border: none;
+      padding: 5px 10px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--c-text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s, color 0.15s;
+
+      &:hover {
+        color: var(--c-text);
+      }
+    }
+
+    .segmentOn {
+      background: var(--c-surface);
+      color: var(--c-text);
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.15);
+    }
+}
+
+.playButton {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--c-accent);
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(46, 139, 46, 0.35);
+    transition: background-color 0.15s, transform 0.1s;
+
+    svg {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+
+    &:hover {
+      background: var(--c-accent-strong);
+    }
+
+    &:active {
+      transform: scale(0.95);
+    }
+}
+
+.playing {
+    background: var(--c-text);
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.3);
+
+    &:hover {
+      background: #000;
+    }
+}
+
+.roundButton {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--c-border);
+    border-radius: 50%;
+    background: var(--c-surface);
+    color: var(--c-text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+
+    &:hover:not(:disabled) {
+      background: var(--c-surface-2);
+      color: var(--c-text);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+}
+
+.loopActive {
+    background: var(--c-loop);
+    border-color: var(--c-loop);
+    color: #fff;
+
+    &:hover:not(:disabled) {
+      background: var(--c-loop);
+      color: #fff;
+      filter: brightness(0.95);
+    }
+}
+
+.bpmControl {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.bpmField {
+    display: flex;
+    align-items: baseline;
+    column-gap: 4px;
+    padding: 6px 10px;
+    min-width: 72px;
+    justify-content: center;
+    cursor: ns-resize;
+    user-select: none;
+    touch-action: none;
+
+    &:focus-visible {
+      outline: 2px solid var(--c-info);
+      outline-offset: -2px;
+    }
+}
+
+.bpmValue {
+    font-size: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.bpmUnit {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--c-text-muted);
+}
+
+.bpmInput {
+    width: 72px;
+    border: none;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 20px;
+    font-weight: 700;
+    text-align: center;
+    outline: 2px solid var(--c-info);
+    outline-offset: -2px;
+}
+
+.bpmSteppers {
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--c-border);
+
+    button {
+      flex: 1;
+      border: none;
+      padding: 0 7px;
+      background: var(--c-surface-2);
+      color: var(--c-text-muted);
+      font-size: 10px;
+      line-height: 1;
+      cursor: pointer;
+
+      & + button {
+        border-top: 1px solid var(--c-border);
+      }
+
+      &:hover:not(:disabled) {
+        background: var(--c-surface-3);
+        color: var(--c-text);
+      }
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+    }
+}
+
+.loopStrip {
+    display: flex;
+    align-items: center;
+    column-gap: 8px;
+    font-size: 11px;
+    color: var(--c-text-muted);
+
+    button {
+      border: 1px solid transparent;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      background: none;
+      color: var(--c-text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+
+      &:hover {
+        background: var(--c-surface-2);
+        color: var(--c-text);
+      }
+    }
+
+    span {
+      max-width: 280px;
+      text-align: center;
+    }
+}
+
+.loopReadoutOn {
+    color: var(--c-loop);
+    font-weight: 600;
+}
+
+.trackPills {
+    display: flex;
+    gap: 6px;
+}
+
+.trackPill {
+    display: inline-flex;
+    align-items: center;
+    column-gap: 6px;
+    padding: 5px 12px 5px 10px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-pill);
+    background: var(--c-surface);
+    color: var(--c-text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+
+    &:hover {
+      border-color: var(--c-text-muted);
+    }
+}
+
+.trackDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--c-text-muted);
+    box-sizing: border-box;
+    transition: background-color 0.15s, box-shadow 0.15s;
+}
+
+.trackOn {
+    border-color: var(--c-accent);
+    background: var(--c-accent-soft);
+    color: var(--c-text);
+
+    &:hover {
+      border-color: var(--c-accent-strong);
+    }
+
+    .trackDot {
+      border-color: var(--c-accent);
+      background: var(--c-accent);
+      box-shadow: 0 0 6px var(--c-accent);
+    }
+}
+
+.ghostButton {
+    padding: 6px 12px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    background: var(--c-surface);
+    color: var(--c-text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.15s;
+
+    &:hover {
+      background: var(--c-surface-2);
+    }
+}
+
+.iconButton {
+    width: 34px;
+    height: 32px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: none;
+    color: var(--c-text-muted);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+
+    &:hover,
+    &[aria-expanded="true"] {
+      background: var(--c-surface-2);
+      color: var(--c-text);
+    }
+}
+
+.menuWrap {
+    position: relative;
 }
 
 .songTabs {
@@ -294,114 +654,6 @@
       background-color: rgb(71, 182, 71);
       color: black;
     }
-}
-
-.controls .key {
-    position: absolute;
-    left: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    margin-right: 0;
-}
-
-.controls .oscToggle {
-    position: absolute;
-    right: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 60px;
-    height: 60px;
-    font-size: 10px;
-    line-height: 1.3;
-    text-align: center;
-    overflow: hidden;
-}
-
-.songControls {
-    display: inline-flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    row-gap: 4px;
-    vertical-align: middle;
-    margin-right: 16px;
-}
-
-.fader {
-    display: flex;
-    flex-direction: column;
-    row-gap: 4px;
-    width: 100%;
-    min-width: 0;
-}
-
-/* Matches the rendered height of .button so the BPM label and slider rows land
-   on the same lines as Chords/Bass/Drums and Use Midi/Save-Load/Log Out. */
-.bpmRow {
-    height: 28.6562px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-}
-
-.bpmControls {
-    display: inline-flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    align-items: center;
-    row-gap: 4px;
-    min-width: 90px;
-    vertical-align: middle;
-}
-
-.midiControls {
-    display: inline-flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    row-gap: 4px;
-    vertical-align: middle;
-    margin-left: 16px;
-}
-
-/* Define standard appearance for range input */
-input[type="range"].bpm {
-  -webkit-appearance: none; /* Safari and Chrome */
-  -moz-appearance: none; /* Firefox */
-  appearance: none; /* Standard */
-  width: 100%;
-  min-width: 40px;
-  max-width: 180px;
-  height: 8px;
-  border-radius: 5px;
-  background: linear-gradient(to right, blue, rgb(187, 187, 254)) no-repeat center;
-  background-size: calc(((100% - 8px) / 150) * var(--value)) 100%;
-}
-
-/* Define standard appearance for range input thumb */
-input[type="range"].bpm::-webkit-slider-thumb {
-  -webkit-appearance: none; /* Safari and Chrome */
-  appearance: none; /* Standard */
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: black;
-  cursor: pointer;
-  margin-top: -1px;
-}
-
-/* Define standard appearance for range input thumb in Firefox */
-input[type="range"].bpm::-moz-range-thumb {
-  -moz-appearance: none;
-  appearance: none; /* Standard */
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: black;
-  cursor: pointer;
-  margin-top: -1px;
 }
 
 .error {
@@ -691,44 +943,13 @@ input[type="range"].bpm::-moz-range-thumb {
     color: #888;
 }
 
-// Loop: blocks inside the loop region, transport controls, readout.
+// Loop: blocks inside the loop region.
 .inLoop {
     box-shadow: inset 0 -3px 0 #ff8c00, 0 0 0 2px #ff8c00;
 }
 
 .inLoopOff {
     box-shadow: 0 0 0 2px #bbb;
-}
-
-.loopControls {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    row-gap: 4px;
-    margin: 0 16px;
-}
-
-.loopButtons {
-    display: flex;
-    column-gap: 4px;
-
-    .button {
-      width: auto;
-      padding: 0 10px;
-    }
-
-    .button:disabled {
-      background-color: #e5e5e5;
-      color: #999;
-      cursor: not-allowed;
-    }
-}
-
-.loopReadout {
-    font-size: 11px;
-    color: #555;
-    max-width: 260px;
-    text-align: center;
 }
 
 .loopingSection {
@@ -853,6 +1074,23 @@ input[type="range"].bpm::-moz-range-thumb {
 
 .partMenuDanger:not(:disabled) {
     color: #c0392b;
+}
+
+// The transport's "more" menu: the part menu's look, opening upward from
+// its button since the bar sits at the bottom of the window.
+.overflowMenu {
+    position: absolute;
+    top: auto;
+    left: auto;
+    right: 0;
+    bottom: calc(100% + 6px);
+    min-width: 170px;
+}
+
+.menuDivider {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--c-border);
 }
 
 // Undo: far right of the parts row, shown when there's a change to undo.

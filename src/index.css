@@ -1,6 +1,27 @@
 :root {
   font-family: "Helvetica Neue", Arial, sans-serif;
   font-size: 16px;
+
+  /* Design tokens: the app's colors, radii and shadows in one place. */
+  --c-surface: #ffffff;
+  --c-surface-2: #f3f5f8;
+  --c-surface-3: #e6eaef;
+  --c-border: #dde3ea;
+  --c-text: #1f2328;
+  --c-text-muted: #66707c;
+  --c-accent: rgb(71, 182, 71);
+  --c-accent-strong: #2e8b2e;
+  --c-accent-soft: #e5f5e5;
+  --c-info: #4281b2;
+  --c-info-soft: #e3eefa;
+  --c-loop: #ff8c00;
+  --c-loop-soft: #fff1e0;
+  --c-danger: #c0392b;
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-pill: 999px;
+  --shadow-bar: 0 -1px 0 var(--c-border), 0 -6px 18px rgba(16, 24, 40, 0.06);
+  --shadow-pop: 0 6px 18px rgba(16, 24, 40, 0.18);
 }
 
 *:focus,
